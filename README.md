@@ -1,8 +1,8 @@
-# Shogi AI Research — GPL v3 対応ソースコード配布パッケージ
+# 将棋Vault — GPL v3 対応ソースコード配布パッケージ
 
 ## 概要
 
-このリポジトリは、iOS/Android アプリ「Shogi AI Research」が組み込む将棋エンジン
+このリポジトリは、iOS/Android アプリ「将棋Vault」が組み込む将棋エンジン
 「やねうら王」(GPL v3) の**エンジン統合部分のソースコード**を、GPLv3第6条に基づく
 対応ソース(Corresponding Source)として公開するものです。
 
@@ -103,4 +103,4 @@ GPL v3 の全文は [`LICENSE.txt`](LICENSE.txt) を参照してください。
 
 ---
 
-Shogi AI Research
+将棋Vault

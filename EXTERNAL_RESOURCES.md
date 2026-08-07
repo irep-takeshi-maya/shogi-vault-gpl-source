@@ -60,4 +60,4 @@ assets/eval/
 
 ---
 
-Shogi AI Research
+将棋Vault

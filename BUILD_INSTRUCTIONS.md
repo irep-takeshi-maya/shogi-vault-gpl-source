@@ -68,4 +68,4 @@ Xcodeプロジェクトを生成してしまう。submodule取得後は必ず `p
 
 ---
 
-Shogi AI Research
+将棋Vault
