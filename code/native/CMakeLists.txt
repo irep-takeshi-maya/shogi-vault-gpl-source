@@ -8,6 +8,9 @@
 # 弱いが本物の探索が動く。強い NNUE への差し替えは段階2-b(要 embedded_nnue.cpp)。
 #
 # ソース一覧・定義は YaneuraOu 本体の source/Makefile(SOURCES / MATERIAL 節)に準拠。
+#
+# v8.60git 化(Issue #29)に伴い memory.cpp を追加。tt.cpp/tt.h・numa.h(header-only)が
+# 新たに memory.h(aligned_large_pages_alloc 等)へ依存するようになったため。
 
 cmake_minimum_required(VERSION 3.22)
 project(yaneuraou CXX)
@@ -22,6 +25,7 @@ set(YO_SRC
     ${YO}/types.cpp
     ${YO}/bitboard.cpp
     ${YO}/misc.cpp
+    ${YO}/memory.cpp
     ${YO}/movegen.cpp
     ${YO}/position.cpp
     ${YO}/usi.cpp

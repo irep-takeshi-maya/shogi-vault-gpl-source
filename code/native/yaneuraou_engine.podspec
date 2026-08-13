@@ -24,6 +24,7 @@ Pod::Spec.new do |s|
     "#{yo}/types.cpp",
     "#{yo}/bitboard.cpp",
     "#{yo}/misc.cpp",
+    "#{yo}/memory.cpp",
     "#{yo}/movegen.cpp",
     "#{yo}/position.cpp",
     "#{yo}/usi.cpp",

@@ -2,7 +2,7 @@
 
 ## 概要
 
-やねうら王(pin コミット `599378d`)を、Android(`.so`, NDK/CMake)と iOS(静的リンク,
+やねうら王(pin コミット `eb2856f9`、タグ `v8.60git`)を、Android(`.so`, NDK/CMake)と iOS(静的リンク,
 CocoaPods)向けにビルドする手順です。エンジンは評価関数不要な material 構成をベースに、
 NNUE(水匠5, HalfKP KP256)を実行時ロードで組み込みます。
 
