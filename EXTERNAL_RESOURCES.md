@@ -14,7 +14,7 @@
 ```bash
 git clone https://github.com/yaneurao/YaneuraOu.git
 cd YaneuraOu
-git checkout 599378d420fa9a8cdae9b1b816615313d41ccf6e   # V7.61-50-g599378d4
+git checkout eb2856f91e6088e5b8c1216e3d84d0563f7cd85f   # v8.60git
 ```
 
 配置先:
@@ -25,7 +25,10 @@ code/native/third_party/YaneuraOu/
 
 公式リポジトリ: https://github.com/yaneurao/YaneuraOu
 ライセンス: GPL v3
-pin コミット: `599378d420fa9a8cdae9b1b816615313d41ccf6e`(タグ `V7.61-50-g599378d4`)
+pin コミット: `eb2856f91e6088e5b8c1216e3d84d0563f7cd85f`(タグ `v8.60git`)。
+旧pinは `599378d420fa9a8cdae9b1b816615313d41ccf6e`(タグ `V7.61-50-g599378d4`、
+V7.61系)だったが、2026-08にIssue #29の方針(きふみAI同等構成への追随)に基づき
+更新した。評価関数(水匠5)は変更なし。
 
 ### 2. 評価関数ファイル(nn.bin, 水匠5)
 

@@ -80,6 +80,14 @@ class SocketInStreambuf : public std::streambuf {
 };
 
 // YaneuraOu を初期化し、ソケットを標準入出力に見立てて USI ループを回す。
+//
+// v8.60git の source/main.cpp に準拠した初期化順序(段階2実装当時の 599378d からの変更点):
+// 静的 API だった `CommandLine::init(argc, argv)` は廃止され、`USIEngine` という
+// コンストラクタベースのラッパー(内部で CommandLine を保持するだけの薄いクラス。
+// source/usi.h 参照)に置き換わっている。また Bitboards::init()/Position::init() が
+// USIEngine 構築より前に呼ばれる順序に変わっている。
+// `engine` はスコープを抜けると破棄されるため、main.cpp 同様 USI::loop() が返るまで
+// 生存させる必要がある(=関数ローカル変数のまま最後まで置く)。
 void run_engine(int fd) {
   SocketOutStreambuf out(fd);
   SocketInStreambuf in(fd);
@@ -91,10 +99,12 @@ void run_engine(int fd) {
   char* argv[] = {const_cast<char*>(prog), nullptr};
   int argc = 1;
 
-  CommandLine::init(argc, argv);
-  USI::init(Options);
   Bitboards::init();
   Position::init();
+
+  USIEngine engine(argc, argv);
+
+  USI::init(Options);
   Search::init();
   const size_t thread_num =
       Options.count("Threads") ? static_cast<size_t>(Options["Threads"]) : 1;
