@@ -17,6 +17,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <streambuf>
 #include <string>
 #include <thread>
@@ -25,11 +26,11 @@
 #include "bitboard.h"
 #include "misc.h"
 #include "position.h"
-#include "search.h"
-#include "thread.h"
-#include "tt.h"
-#include "usi.h"
-#include "evaluate.h"
+#include "types.h"
+
+// V9.00 では YaneuraOu 本体のシンボルはすべて namespace YaneuraOu 配下に
+// 移動した(Stockfish由来の大規模リファクタ)。
+using namespace YaneuraOu;
 
 namespace {
 
@@ -81,13 +82,28 @@ class SocketInStreambuf : public std::streambuf {
 
 // YaneuraOu を初期化し、ソケットを標準入出力に見立てて USI ループを回す。
 //
-// v8.60git の source/main.cpp に準拠した初期化順序(段階2実装当時の 599378d からの変更点):
-// 静的 API だった `CommandLine::init(argc, argv)` は廃止され、`USIEngine` という
-// コンストラクタベースのラッパー(内部で CommandLine を保持するだけの薄いクラス。
-// source/usi.h 参照)に置き換わっている。また Bitboards::init()/Position::init() が
-// USIEngine 構築より前に呼ばれる順序に変わっている。
-// `engine` はスコープを抜けると破棄されるため、main.cpp 同様 USI::loop() が返るまで
-// 生存させる必要がある(=関数ローカル変数のまま最後まで置く)。
+// V9.00 の source/main.cpp に準拠した初期化順序(v8.60git からの変更点):
+// V9.00 は Stockfish 本家に合わせた大規模リファクタが入っており、`Options`/
+// `Threads`/`Search::init`/`Eval::init` のようなグローバル関数・オブジェクトは
+// 廃止された。エンジン実体は `IEngine`/`Engine` を継承する具象クラス
+// (本アプリの構成では `YaneuraOuEngine`。source/engine/yaneuraou-engine/
+// yaneuraou-search.cpp)が持つメンバに変わり、`Options.add("Threads", ...)`
+// のようなオプション登録・`Threads.set(...)` によるスレッドプール構築・
+// `Eval::init()` 相当の評価関数初期化はすべてそのクラスのコンストラクタ/
+// isready ハンドラ内で行われるようになった。
+//
+// 本体をどのエンジン実体で動かすかは、リンクした .cpp が static
+// `EngineFuncRegister` でエントリポイントを自己登録する仕組みに変わっている
+// (source/engine.cpp の `run_engine_entry()` が登録済みのエンジンのうち
+// priority 最大のものを起動する)。本アプリは
+// `engine/yaneuraou-engine/yaneuraou-search.cpp` の1つしかリンクしないため、
+// 常に `YaneuraOuEngine` が起動する。
+//
+// そのため、main.cpp と同じ手順(CommandLine::g.set_arg → Bitboards::init →
+// Position::init → run_engine_entry)を踏むだけでよく、USIEngine/Options/
+// Threads を直接操作する必要はなくなった(README/CHANGELOG も参照)。
+// `run_engine_entry()` は内部の `USIEngine::loop()` が "quit" を受け取るまで
+// 戻らない(=関数呼び出しがブロックする)。
 void run_engine(int fd) {
   SocketOutStreambuf out(fd);
   SocketInStreambuf in(fd);
@@ -99,21 +115,14 @@ void run_engine(int fd) {
   char* argv[] = {const_cast<char*>(prog), nullptr};
   int argc = 1;
 
+  CommandLine::g.set_arg(argc, argv);
+
   Bitboards::init();
   Position::init();
 
-  USIEngine engine(argc, argv);
-
-  USI::init(Options);
-  Search::init();
-  const size_t thread_num =
-      Options.count("Threads") ? static_cast<size_t>(Options["Threads"]) : 1;
-  Threads.set(thread_num);
-  Eval::init();
-
-  USI::loop(argc, argv);
-
-  Threads.set(0);
+  // 登録済みエンジン(YaneuraOuEngine)の entry point を起動。"quit" が
+  // 来るまでブロックする。
+  run_engine_entry();
 }
 
 void engine_thread(std::string ip, int port) {
@@ -137,9 +146,34 @@ void engine_thread(std::string ip, int port) {
   ::close(fd);
 }
 
+// 直近に起動したエンジンスレッド。Threads/Options/std::cin・cout は
+// YaneuraOu 内部でプロセス全体を通した単一のグローバル状態であり、複数の
+// run_engine() を同時に走らせる設計にはなっていない。前のスレッドが
+// USI::loop() を抜けきる前に次のスレッドがそれらを再初期化すると、前の
+// スレッドが参照中の Position/Thread が壊され、EXC_BAD_ACCESS 等の
+// メモリ破壊を招く。そのため起動のたびに前のスレッドの終了を待ってから
+// 新しいエンジン本体を走らせる。
+//
+// 前のスレッドの join は、そのスレッドを生成する側(下記の新しいラッパー
+// スレッド)の中で行う。yaneuraou_start() 自身(呼び出し元である Dart の
+// FFI 呼び出しスレッド、モバイルではメイン/UI スレッド)をここで
+// ブロックしてしまうと、前のスレッドが万一終了しない場合にアプリ全体が
+// 無期限にフリーズする。そのため yaneuraou_start() は常に即座に返し、
+// join 待ちはバックグラウンドのラッパースレッド側で行う。
+std::mutex g_engine_thread_mutex;
+std::thread g_engine_thread;
+
+void start_engine_thread(std::thread previous, std::string ip, int port) {
+  if (previous.joinable()) previous.join();
+  engine_thread(std::move(ip), port);
+}
+
 }  // namespace
 
 extern "C" int yaneuraou_start(const char* ip, int port) {
-  std::thread(engine_thread, std::string(ip), port).detach();
+  std::lock_guard<std::mutex> lock(g_engine_thread_mutex);
+  std::thread previous = std::move(g_engine_thread);
+  g_engine_thread =
+      std::thread(start_engine_thread, std::move(previous), std::string(ip), port);
   return 0;
 }

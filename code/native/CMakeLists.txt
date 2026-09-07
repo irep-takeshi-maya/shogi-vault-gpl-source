@@ -7,10 +7,17 @@
 # で YaneuraOu 本体が Android NDK でクロスコンパイル/リンクできることを確定する。
 # 弱いが本物の探索が動く。強い NNUE への差し替えは段階2-b(要 embedded_nnue.cpp)。
 #
-# ソース一覧・定義は YaneuraOu 本体の source/Makefile(SOURCES / MATERIAL 節)に準拠。
+# ソース一覧・定義は YaneuraOu 本体の source/Makefile(SOURCES / NNUE 節)に準拠。
 #
 # v8.60git 化(Issue #29)に伴い memory.cpp を追加。tt.cpp/tt.h・numa.h(header-only)が
 # 新たに memory.h(aligned_large_pages_alloc 等)へ依存するようになったため。
+#
+# V9.00 化(Issue #134)に伴いソース一覧を全面更新。Stockfish本家に合わせた大規模
+# リファクタで engine.cpp(旧: #if 0 で無効化されていたWIPコードだったが実体化)/
+# search.cpp/score.cpp/benchmark.cpp/tune.cpp が新規に必須ファイルとなり、
+# usi_option.cpp は usioption.cpp へ改名、testcmd/benchmark.cpp は削除され
+# ルートの benchmark.cpp に統合、extra/super_sort.cpp は削除された。詳細は
+# shogi-vault の native/README.md の「段階5」を参照。
 
 cmake_minimum_required(VERSION 3.22)
 project(yaneuraou CXX)
@@ -20,7 +27,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(YO "${CMAKE_CURRENT_SOURCE_DIR}/third_party/YaneuraOu/source")
 
-# --- YaneuraOu 本体(material 構成)。main.cpp は除外し、ブリッジで置き換える。
+# --- YaneuraOu 本体(NNUE 構成)。main.cpp は除外し、ブリッジで置き換える。
 set(YO_SRC
     ${YO}/types.cpp
     ${YO}/bitboard.cpp
@@ -29,17 +36,33 @@ set(YO_SRC
     ${YO}/movegen.cpp
     ${YO}/position.cpp
     ${YO}/usi.cpp
-    ${YO}/usi_option.cpp
+    ${YO}/usioption.cpp
     ${YO}/thread.cpp
     ${YO}/tt.cpp
     ${YO}/movepick.cpp
     ${YO}/timeman.cpp
+    ${YO}/engine.cpp
+    ${YO}/search.cpp
+    ${YO}/score.cpp
+    ${YO}/benchmark.cpp
+    ${YO}/tune.cpp
     ${YO}/book/book.cpp
     ${YO}/book/apery_book.cpp
+    ${YO}/book/policybook.cpp
+    # makebook.cpp は ENABLE_MAKEBOOK_CMD(V9.00 の YANEURAOU_ENGINE 系では
+    # config.h で無条件に定義される)経由で usi.cpp から Book::makebook() が
+    # 常時呼ばれるため必須。実際に定跡生成コマンドを使わなくてもリンクは必要。
+    ${YO}/book/makebook.cpp
+    ${YO}/book/makebook2015.cpp
+    ${YO}/book/makebook2025.cpp
+    # makebook2015.cpp が参照する学習系シンボル(Learner::search等)のリンクに必要。
+    # EVAL_LEARN を定義しない限り実処理は #if で無効化されたままなのでサイズ増程度の影響。
+    ${YO}/learn/learner.cpp
+    ${YO}/learn/learning_tools.cpp
+    ${YO}/learn/multi_think.cpp
     ${YO}/extra/bitop.cpp
     ${YO}/extra/long_effect.cpp
     ${YO}/extra/sfen_packer.cpp
-    ${YO}/extra/super_sort.cpp
     ${YO}/mate/mate.cpp
     ${YO}/mate/mate1ply_without_effect.cpp
     ${YO}/mate/mate1ply_with_effect.cpp
@@ -52,7 +75,6 @@ set(YO_SRC
     ${YO}/testcmd/unit_test.cpp
     ${YO}/testcmd/mate_test_cmd.cpp
     ${YO}/testcmd/normal_test_cmd.cpp
-    ${YO}/testcmd/benchmark.cpp
     ${YO}/engine/yaneuraou-engine/yaneuraou-search.cpp
     # NNUE(水匠5 = HalfKP KP256)。Makefile の NNUE 節に準拠。
     # 評価関数(nn.bin)は埋め込まず、実行時に EvalDir から読む(EVAL_EMBEDDING 無し)。
