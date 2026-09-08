@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'GPLv3' }
   s.author           = { 'shogi-vault' => 'noreply@example.com' }
   s.source           = { :path => '.' }
-  s.platform         = :ios, '13.0'
+  s.platform         = :ios, '14.0'
   s.requires_arc     = false
 
   yo = 'third_party/YaneuraOu/source'
@@ -20,7 +20,8 @@ Pod::Spec.new do |s|
   s.source_files = [
     'bridge/engine_bridge.cpp',
     'bridge/engine_bridge.h',
-    # --- YaneuraOu 本体(material の基本セット)。main.cpp は除外。
+    # --- YaneuraOu 本体(NNUE の基本セット)。main.cpp は除外。
+    # V9.00化(Issue #134)でファイル一覧を刷新。native/CMakeLists.txt のコメント参照。
     "#{yo}/types.cpp",
     "#{yo}/bitboard.cpp",
     "#{yo}/misc.cpp",
@@ -28,17 +29,29 @@ Pod::Spec.new do |s|
     "#{yo}/movegen.cpp",
     "#{yo}/position.cpp",
     "#{yo}/usi.cpp",
-    "#{yo}/usi_option.cpp",
+    "#{yo}/usioption.cpp",
     "#{yo}/thread.cpp",
     "#{yo}/tt.cpp",
     "#{yo}/movepick.cpp",
     "#{yo}/timeman.cpp",
+    "#{yo}/engine.cpp",
+    "#{yo}/search.cpp",
+    "#{yo}/score.cpp",
+    "#{yo}/benchmark.cpp",
+    "#{yo}/tune.cpp",
     "#{yo}/book/book.cpp",
     "#{yo}/book/apery_book.cpp",
+    "#{yo}/book/policybook.cpp",
+    # makebook.cpp は ENABLE_MAKEBOOK_CMD 経由で usi.cpp から常時参照されるため必須。
+    "#{yo}/book/makebook.cpp",
+    "#{yo}/book/makebook2015.cpp",
+    "#{yo}/book/makebook2025.cpp",
+    "#{yo}/learn/learner.cpp",
+    "#{yo}/learn/learning_tools.cpp",
+    "#{yo}/learn/multi_think.cpp",
     "#{yo}/extra/bitop.cpp",
     "#{yo}/extra/long_effect.cpp",
     "#{yo}/extra/sfen_packer.cpp",
-    "#{yo}/extra/super_sort.cpp",
     "#{yo}/mate/mate.cpp",
     "#{yo}/mate/mate1ply_without_effect.cpp",
     "#{yo}/mate/mate1ply_with_effect.cpp",
@@ -51,7 +64,6 @@ Pod::Spec.new do |s|
     "#{yo}/testcmd/unit_test.cpp",
     "#{yo}/testcmd/mate_test_cmd.cpp",
     "#{yo}/testcmd/normal_test_cmd.cpp",
-    "#{yo}/testcmd/benchmark.cpp",
     "#{yo}/engine/yaneuraou-engine/yaneuraou-search.cpp",
     # --- NNUE(水匠5 = 標準 halfKP256)
     "#{yo}/eval/nnue/evaluate_nnue.cpp",
