@@ -17,7 +17,7 @@
 # search.cpp/score.cpp/benchmark.cpp/tune.cpp が新規に必須ファイルとなり、
 # usi_option.cpp は usioption.cpp へ改名、testcmd/benchmark.cpp は削除され
 # ルートの benchmark.cpp に統合、extra/super_sort.cpp は削除された。詳細は
-# shogi-vault の native/README.md の「段階5」を参照。
+# native/README.md の「段階5」を参照。
 
 cmake_minimum_required(VERSION 3.22)
 project(yaneuraou CXX)
@@ -90,41 +90,86 @@ set(YO_SRC
     ${YO}/eval/nnue/features/pe9.cpp
 )
 
-add_library(yaneuraou SHARED
-    ${YO_SRC}
-    bridge/engine_bridge.cpp
-)
+# --- 評価関数アーキテクチャごとに1つの共有ライブラリを作る。
+#
+# NNUE のネットワーク構造は YaneuraOu 本体にビルド時固定で焼き込まれるため、
+# 別アーキテクチャの評価関数(AobaNNUE = halfkp_768x2-16-64)に対応するには
+# **別のバイナリ**が要る(Issue #134/#282)。実行時に切り替えることはできない。
+#
+# 同一プロセスへ複数載せるため、公開するエントリ関数名を
+# `YANEURAOU_BRIDGE_SYMBOL` で分ける。YaneuraOu 本体の内部シンボルは重複するが、
+# Android では別々の .so として dlopen され、それぞれ独立したシンボル
+# 名前空間を持つ(Dart の DynamicLibrary.open は RTLD_LOCAL 相当)ため衝突しない。
+#
+# arch_header にファイル名を渡すと、本体の nnue_architecture.h が持つ
+# `NNUE_ARCHITECTURE_HEADER` フック経由で include される。ヘッダは
+# native/arch/ を include パスに通して解決するので、脆い相対パスを書かずに済む。
+# このフックのおかげで、アーキテクチャ追加に submodule の改変は要らない。
+function(add_yaneuraou_engine target_name bridge_symbol arch_define arch_header)
+    add_library(${target_name} SHARED
+        ${YO_SRC}
+        bridge/engine_bridge.cpp
+    )
 
-target_include_directories(yaneuraou PRIVATE ${YO} bridge)
+    target_include_directories(${target_name} PRIVATE
+        ${YO}
+        bridge
+        ${CMAKE_CURRENT_SOURCE_DIR}/arch
+    )
 
-# 共通定義(Makefile の base + NNUE 節に準拠)。
-# 水匠5 は HalfKP KP256 → EVAL_NNUE_KP256。EVAL_EMBEDDING は付けず、
-# nn.bin は実行時に EvalDir から読み込む。
-target_compile_definitions(yaneuraou PRIVATE
-    NDEBUG
-    _LINUX
-    UNICODE
-    NO_EXCEPTIONS
-    IS_64BIT
-    YANEURAOU_ENGINE_NNUE
-    # 水匠5 は標準 halfKP256(HalfKP 256x2-32-32)。EVAL_NNUE_KP256 は別物の
-    # 小型 k-p アーキなので nn.bin のアーキハッシュ不一致で読込失敗し exit する。
-    EVAL_NNUE_HALFKP256
-)
+    # 共通定義(Makefile の base + NNUE 節に準拠)。
+    # EVAL_EMBEDDING は付けず、nn.bin は実行時に EvalDir から読み込む。
+    target_compile_definitions(${target_name} PRIVATE
+        NDEBUG
+        _LINUX
+        UNICODE
+        NO_EXCEPTIONS
+        IS_64BIT
+        YANEURAOU_ENGINE_NNUE
+        YANEURAOU_BRIDGE_SYMBOL=${bridge_symbol}
+    )
 
-# 参照実装(iOS clang)で実績のあるフラグ。-w で本体の警告を抑制。
-target_compile_options(yaneuraou PRIVATE
-    -O2
-    -fno-exceptions
-    -fno-rtti
-    -fpermissive
-    -w
-)
+    if(arch_header STREQUAL "")
+        # 既定(水匠5 = 標準 halfKP256)。EVAL_NNUE_KP256 は別物の小型 k-p アーキ
+        # なので nn.bin のアーキハッシュ不一致で読込失敗し exit する。
+        target_compile_definitions(${target_name} PRIVATE ${arch_define})
+    else()
+        target_compile_definitions(${target_name} PRIVATE
+            "NNUE_ARCHITECTURE_HEADER=\"${arch_header}\""
+        )
+    endif()
 
-# アーキテクチャ別 SIMD(Makefile: arm=NEON / x86_64=SSE4.2)。
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    target_compile_definitions(yaneuraou PRIVATE USE_NEON)
-elseif(ANDROID_ABI STREQUAL "x86_64")
-    target_compile_definitions(yaneuraou PRIVATE USE_SSE42)
-    target_compile_options(yaneuraou PRIVATE -msse4.2)
-endif()
+    # 参照実装(iOS clang)で実績のあるフラグ。-w で本体の警告を抑制。
+    #
+    # -fvisibility=hidden は複数エンジンを同一プロセスへ載せるために必須。
+    # 付けないと YaneuraOu 本体の C++ シンボルが各ライブラリから約970個ずつ
+    # export され、動的リンカが呼び出し先を取り違える(iOS で実際に、水匠5側の
+    # 探索が AobaNNUE 側の未初期化 TranspositionTable を呼んで SIGSEGV した)。
+    # Android は dlopen が RTLD_LOCAL 相当のため表面化しにくいが、条件を
+    # 揃えておく。ブリッジのエントリ関数だけは engine_bridge.h の
+    # __attribute__((visibility("default"))) で export される。
+    target_compile_options(${target_name} PRIVATE
+        -O2
+        -fno-exceptions
+        -fno-rtti
+        -fpermissive
+        -w
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+    )
+
+    # アーキテクチャ別 SIMD(Makefile: arm=NEON / x86_64=SSE4.2)。
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+        target_compile_definitions(${target_name} PRIVATE USE_NEON)
+    elseif(ANDROID_ABI STREQUAL "x86_64")
+        target_compile_definitions(${target_name} PRIVATE USE_SSE42)
+        target_compile_options(${target_name} PRIVATE -msse4.2)
+    endif()
+endfunction()
+
+# 水匠5(アプリ同梱、halfkp_256x2-32-32)。
+add_yaneuraou_engine(yaneuraou yaneuraou_start EVAL_NNUE_HALFKP256 "")
+
+# AobaNNUE(アプリ内ダウンロード、halfkp_768x2-16-64)。
+# ヘッダ名だけを渡し、実体は native/arch/ を include パスから解決する。
+add_yaneuraou_engine(aobannue aobannue_start "" "halfkp_768x2-16-64.h")

@@ -68,3 +68,48 @@ assets/eval/
 ---
 
 将棋Vault
+
+
+### 2-b. 評価関数ファイル(nn.bin, AobaNNUE)
+
+必要なファイル: NNUE評価関数ファイル(HalfKP 768x2-16-64, 約184MB)
+
+アプリには同梱せず、ユーザーの操作でアプリ内ダウンロードして導入する任意の
+評価関数。ビルドそのものには不要だが、`aobannue` ターゲット(AobaNNUE 用の
+エンジンバイナリ)の動作確認には必要。
+
+入手先(本プロジェクトが GPLv3 のもとで再配布しているミラー):
+
+```
+https://github.com/irep-takeshi-maya/shogi-vault-gpl-source/releases/tag/aobannue-eval-v1.1
+```
+
+原典: https://github.com/yssaya/AobaNNUE (著作者: 山下 宏 氏)
+ライセンス: GPL v3
+SHA-256: `f8ee839ae8c08537036f23345dd5ed0416958b22425476fc60177942903219b5`
+サイズ: 192,624,720 バイト
+推奨 FV_SCALE: **40**(水匠5の24とは異なる)
+
+著作者が2026-09-27に nn.bin を含む配布物全体が GPLv3 であることを明言している
+(http://www.yss-aya.com/bbs/patio.cgi?read=210)。
+
+#### なぜエンジンバイナリが2つあるか
+
+NNUE のネットワーク構造は、やねうら王本体に**ビルド時固定で焼き込まれる**。
+実行時に切り替えることはできないため、評価関数のアーキテクチャごとに別の
+バイナリが必要になる。
+
+| 評価関数 | アーキテクチャ | エントリ関数 | Android | iOS pod |
+|---|---|---|---|---|
+| 水匠5 | halfkp_256x2-32-32 | `yaneuraou_start` | `libyaneuraou.so` | `yaneuraou_engine` |
+| AobaNNUE | halfkp_768x2-16-64 | `aobannue_start` | `libaobannue.so` | `aobannue_engine` |
+
+アーキテクチャ定義(`code/native/arch/halfkp_768x2-16-64.h`)は AobaNNUE 同梱
+ソース由来。やねうら王本体の `nnue_architecture.h` が持つ
+`NNUE_ARCHITECTURE_HEADER` フック経由で読み込ませており、**やねうら王本体の
+ソースは一切改変していない**。
+
+2つを同一プロセスへ載せるため、公開するエントリ関数名を
+`YANEURAOU_BRIDGE_SYMBOL` で分け、`-fvisibility=hidden` で内部シンボルを
+隠している。これが無いと、本体の C++ シンボルが両方から約970個ずつ export
+され、動的リンカが呼び出し先を取り違えてクラッシュする。
