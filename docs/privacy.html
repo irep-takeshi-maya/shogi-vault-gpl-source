@@ -61,7 +61,7 @@
 利用者がサインインした場合に限り、本アプリは Google LLC が提供する Firebase(Firebase Authentication および Cloud Firestore)を利用して、以下の情報を取り扱います。
 </p>
 <ul>
-  <li><strong>認証に使う情報</strong>: メールアドレス、Firebase が発行する利用者ID、サインイン方法(Appleでサインイン/Googleでサインイン/メールアドレスとパスワード)。Apple または Google でサインインした場合は、各社から提供される識別子とメールアドレスを受け取ります。パスワードは Firebase Authentication が管理し、アプリ運営者が知ることはありません。</li>
+  <li><strong>認証に使う情報</strong>: メールアドレス、Firebase が発行する利用者ID、サインイン方法(Appleでサインイン/Googleでサインイン/メールアドレスとパスワード)。Apple または Google でサインインした場合は、各社から提供される識別子とメールアドレスを受け取ります。Google でサインインした場合(Android版のみ)は、Google アカウントの表示名とプロフィール写真のURLも Firebase Authentication に保存されます。本アプリはこれらを画面表示や同期には使用しません。パスワードは Firebase Authentication が管理し、アプリ運営者が知ることはありません。</li>
   <li><strong>同期するデータ</strong>: 端末に依存しない設定(テーマ・駒の書体・解析の深さ等)、戦型ポートフォリオ・未到マップの進捗、AI対局の段位別進捗。</li>
   <li><strong>同期しないデータ</strong>: 研究・棋譜・変化ツリー・コメント等の棋譜本体、端末ごとのエンジン設定、ダウンロードした評価関数。</li>
 </ul>
