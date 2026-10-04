@@ -37,6 +37,47 @@
 - YaneuraOu が参照する上流エンジン。
 - 取得元: <https://github.com/official-stockfish/Stockfish>
 
+## アプリに同梱するデータ
+
+### 新ペタショック定跡(戦型ポートフォリオの定跡ツリー、Issue #306)
+
+- ライセンス: **MIT License**
+- 著作権: yaneurao(やねうら王チーム)
+- 取得元: <https://github.com/yaneurao/YaneuraOu/releases/tag/new_petabook233>
+  (`new_petabook_20250505c.7z`、2025-06-21 公開)。公開の経緯:
+  <https://yaneuraou.yaneu.com/2025/06/22/2-33m-book-released-for-free/>
+- 用途: 定跡ファイルそのものはアプリに含めない。開発側で `tool/portfolio_book/`
+  により戦型ポートフォリオの各項目の手順・分岐・評価値を抜き出した派生データ
+  (`assets/portfolio_trees/*.json`)だけを同梱する。
+- 配布元(GitHub のリリース本文・公開記事)は「MIT License にて公開」と明記して
+  いるが、MIT License の著作権表示行(`Copyright (c) <年> <著作権者>`)と
+  ライセンス文の同梱は無い。下記の著作権表示は、配布者(GitHub アカウント
+  `yaneurao`)と公開年から記載したもの。
+
+```
+MIT License
+
+Copyright (c) 2025 yaneurao
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## UI フォント
 
 ### BIZ UDPゴシック(BIZ UDPGothic)
