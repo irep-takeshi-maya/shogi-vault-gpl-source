@@ -25,70 +25,107 @@ project(yaneuraou CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(YO "${CMAKE_CURRENT_SOURCE_DIR}/third_party/YaneuraOu/source")
+# --- YaneuraOu のソースは2つの版を持つ(Issue #346)。
+#
+#   V900: native/third_party/YaneuraOu          V9.00 (a5ee2786)。水匠5 / AobaNNUE
+#   V980: native/third_party/YaneuraOu-tsuyoura master c1b80eaa (9.80git)。つようら王11mini
+#
+# つようら王11mini の arch(SFNN ka2 / progress8)は V9.00 に無いため、そのバイナリ
+# だけを 9.80git でビルドする。開発版の影響を Pro の新機能だけに閉じ込めるためで、
+# 本家が次の安定版を出したら1つに揃える。patch もソースごとに分けてある
+# (native/patches/ と native/patches/tsuyoura/、native/apply_patches.sh 参照)。
+set(YO_V900 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/YaneuraOu/source")
+set(YO_V980 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/YaneuraOu-tsuyoura/source")
 
-# --- YaneuraOu 本体(NNUE 構成)。main.cpp は除外し、ブリッジで置き換える。
-set(YO_SRC
-    ${YO}/types.cpp
-    ${YO}/bitboard.cpp
-    ${YO}/misc.cpp
-    ${YO}/memory.cpp
-    ${YO}/movegen.cpp
-    ${YO}/position.cpp
-    ${YO}/usi.cpp
-    ${YO}/usioption.cpp
-    ${YO}/thread.cpp
-    ${YO}/tt.cpp
-    ${YO}/movepick.cpp
-    ${YO}/timeman.cpp
-    ${YO}/engine.cpp
-    ${YO}/search.cpp
-    ${YO}/score.cpp
-    ${YO}/benchmark.cpp
-    ${YO}/tune.cpp
-    ${YO}/book/book.cpp
-    ${YO}/book/apery_book.cpp
-    ${YO}/book/policybook.cpp
-    # makebook.cpp は ENABLE_MAKEBOOK_CMD(V9.00 の YANEURAOU_ENGINE 系では
-    # config.h で無条件に定義される)経由で usi.cpp から Book::makebook() が
-    # 常時呼ばれるため必須。実際に定跡生成コマンドを使わなくてもリンクは必要。
-    ${YO}/book/makebook.cpp
-    ${YO}/book/makebook2015.cpp
-    ${YO}/book/makebook2025.cpp
-    # makebook2015.cpp が参照する学習系シンボル(Learner::search等)のリンクに必要。
-    # EVAL_LEARN を定義しない限り実処理は #if で無効化されたままなのでサイズ増程度の影響。
-    ${YO}/learn/learner.cpp
-    ${YO}/learn/learning_tools.cpp
-    ${YO}/learn/multi_think.cpp
-    ${YO}/extra/bitop.cpp
-    ${YO}/extra/long_effect.cpp
-    ${YO}/extra/sfen_packer.cpp
-    ${YO}/mate/mate.cpp
-    ${YO}/mate/mate1ply_without_effect.cpp
-    ${YO}/mate/mate1ply_with_effect.cpp
-    ${YO}/mate/mate_solver.cpp
-    ${YO}/eval/evaluate_bona_piece.cpp
-    ${YO}/eval/evaluate.cpp
-    ${YO}/eval/evaluate_io.cpp
-    ${YO}/eval/evaluate_mir_inv_tools.cpp
-    ${YO}/eval/material/evaluate_material.cpp
-    ${YO}/testcmd/unit_test.cpp
-    ${YO}/testcmd/mate_test_cmd.cpp
-    ${YO}/testcmd/normal_test_cmd.cpp
-    ${YO}/engine/yaneuraou-engine/yaneuraou-search.cpp
-    # NNUE(水匠5 = HalfKP KP256)。Makefile の NNUE 節に準拠。
-    # 評価関数(nn.bin)は埋め込まず、実行時に EvalDir から読む(EVAL_EMBEDDING 無し)。
-    ${YO}/eval/nnue/evaluate_nnue.cpp
-    ${YO}/eval/nnue/evaluate_nnue_learner.cpp
-    ${YO}/eval/nnue/nnue_test_command.cpp
-    ${YO}/eval/nnue/features/k.cpp
-    ${YO}/eval/nnue/features/p.cpp
-    ${YO}/eval/nnue/features/half_kp.cpp
-    ${YO}/eval/nnue/features/half_kp_vm.cpp
-    ${YO}/eval/nnue/features/half_relative_kp.cpp
-    ${YO}/eval/nnue/features/half_kpe9.cpp
-    ${YO}/eval/nnue/features/pe9.cpp
-)
+# yaneuraou_sources(<出力変数> <V900|V980>)
+# YaneuraOu 本体(NNUE 構成)のソース一覧を返す。main.cpp は除外し、ブリッジで置き換える。
+# 版による違いは本家 source/Makefile の SOURCES / NNUE 節に合わせている。
+# native/engine_sources.rb(iOS)と一致させること。
+function(yaneuraou_sources out_var yo_version)
+    set(YO "${YO_${yo_version}}")
+    if(YO STREQUAL "")
+        message(FATAL_ERROR "yaneuraou_sources: 不明な版 ${yo_version}(V900 か V980)")
+    endif()
+
+    set(src
+        ${YO}/types.cpp
+        ${YO}/bitboard.cpp
+        ${YO}/misc.cpp
+        ${YO}/memory.cpp
+        ${YO}/movegen.cpp
+        ${YO}/position.cpp
+        ${YO}/usi.cpp
+        ${YO}/usioption.cpp
+        ${YO}/thread.cpp
+        ${YO}/tt.cpp
+        ${YO}/movepick.cpp
+        ${YO}/timeman.cpp
+        ${YO}/engine.cpp
+        ${YO}/search.cpp
+        ${YO}/score.cpp
+        ${YO}/benchmark.cpp
+        ${YO}/tune.cpp
+        ${YO}/book/book.cpp
+        ${YO}/book/apery_book.cpp
+        ${YO}/book/policybook.cpp
+        # makebook.cpp は ENABLE_MAKEBOOK_CMD(YANEURAOU_ENGINE 系では config.h で
+        # 無条件に定義される)経由で usi.cpp から Book::makebook() が常時呼ばれる
+        # ため必須。実際に定跡生成コマンドを使わなくてもリンクは必要。
+        ${YO}/book/makebook.cpp
+        ${YO}/book/makebook2025.cpp
+        ${YO}/extra/bitop.cpp
+        ${YO}/extra/long_effect.cpp
+        ${YO}/extra/sfen_packer.cpp
+        ${YO}/mate/mate.cpp
+        ${YO}/mate/mate1ply_without_effect.cpp
+        ${YO}/mate/mate1ply_with_effect.cpp
+        ${YO}/mate/mate_solver.cpp
+        ${YO}/eval/evaluate_bona_piece.cpp
+        ${YO}/eval/evaluate.cpp
+        ${YO}/eval/evaluate_io.cpp
+        ${YO}/eval/evaluate_mir_inv_tools.cpp
+        ${YO}/eval/material/evaluate_material.cpp
+        ${YO}/testcmd/unit_test.cpp
+        ${YO}/testcmd/mate_test_cmd.cpp
+        ${YO}/testcmd/normal_test_cmd.cpp
+        ${YO}/engine/yaneuraou-engine/yaneuraou-search.cpp
+        # NNUE。Makefile の NNUE 節に準拠。
+        # 評価関数(nn.bin)は埋め込まず、実行時に EvalDir から読む(EVAL_EMBEDDING 無し)。
+        ${YO}/eval/nnue/evaluate_nnue.cpp
+        ${YO}/eval/nnue/nnue_test_command.cpp
+        ${YO}/eval/nnue/features/k.cpp
+        ${YO}/eval/nnue/features/p.cpp
+        ${YO}/eval/nnue/features/half_kp.cpp
+        ${YO}/eval/nnue/features/half_kp_vm.cpp
+        ${YO}/eval/nnue/features/half_relative_kp.cpp
+        ${YO}/eval/nnue/features/half_kpe9.cpp
+        ${YO}/eval/nnue/features/pe9.cpp
+    )
+
+    if(yo_version STREQUAL "V900")
+        list(APPEND src
+            # V9.00 のみ。makebook2015.cpp が参照する学習系シンボル(Learner::search等)の
+            # リンクに learn/ が要る。EVAL_LEARN を定義しない限り実処理は #if で無効化されたまま。
+            ${YO}/book/makebook2015.cpp
+            ${YO}/learn/learner.cpp
+            ${YO}/learn/learning_tools.cpp
+            ${YO}/learn/multi_think.cpp
+            ${YO}/eval/nnue/evaluate_nnue_learner.cpp
+        )
+    else()
+        list(APPEND src
+            # 9.80git のみ。makebook2015.cpp / learn/ / evaluate_nnue_learner.cpp は本家で
+            # 削除され、SFNN 系の特徴量(a2 = つようら王の ka2 が使う、half_ka*)が増えた。
+            ${YO}/eval/nnue/features/a2.cpp
+            ${YO}/eval/nnue/features/half_ka1.cpp
+            ${YO}/eval/nnue/features/half_ka_hm1.cpp
+            ${YO}/eval/nnue/features/half_ka2.cpp
+            ${YO}/eval/nnue/features/half_ka_hm2.cpp
+        )
+    endif()
+
+    set(${out_var} ${src} PARENT_SCOPE)
+endfunction()
 
 # --- 評価関数アーキテクチャごとに1つの共有ライブラリを作る。
 #
@@ -105,14 +142,22 @@ set(YO_SRC
 # `NNUE_ARCHITECTURE_HEADER` フック経由で include される。ヘッダは
 # native/arch/ を include パスに通して解決するので、脆い相対パスを書かずに済む。
 # このフックのおかげで、アーキテクチャ追加に submodule の改変は要らない。
-function(add_yaneuraou_engine target_name bridge_symbol arch_define arch_header)
+#
+# yo_version は使う YaneuraOu の版(V900 / V980、上の yaneuraou_sources 参照)。
+#
+# 5つ目より後ろの引数(ARGN)は、そのバイナリの全ソースに付ける追加の定義。
+# SFNN 系(つようら王)は SFNNwoPSQT が要る。position.h の StateInfo の中身が
+# 変わるため、評価関数のソースだけでなく全ソースに揃えて付ける必要がある。
+function(add_yaneuraou_engine target_name bridge_symbol yo_version arch_define arch_header)
+    yaneuraou_sources(yo_src ${yo_version})
     add_library(${target_name} SHARED
-        ${YO_SRC}
+        ${yo_src}
         bridge/engine_bridge.cpp
     )
 
+    # include パスも同じ版のソースを向ける(版の違うヘッダを混ぜない)。
     target_include_directories(${target_name} PRIVATE
-        ${YO}
+        ${YO_${yo_version}}
         bridge
         ${CMAKE_CURRENT_SOURCE_DIR}/arch
     )
@@ -128,6 +173,10 @@ function(add_yaneuraou_engine target_name bridge_symbol arch_define arch_header)
         YANEURAOU_ENGINE_NNUE
         YANEURAOU_BRIDGE_SYMBOL=${bridge_symbol}
     )
+
+    if(ARGN)
+        target_compile_definitions(${target_name} PRIVATE ${ARGN})
+    endif()
 
     if(arch_header STREQUAL "")
         # 既定(水匠5 = 標準 halfKP256)。EVAL_NNUE_KP256 は別物の小型 k-p アーキ
@@ -168,8 +217,13 @@ function(add_yaneuraou_engine target_name bridge_symbol arch_define arch_header)
 endfunction()
 
 # 水匠5(アプリ同梱、halfkp_256x2-32-32)。
-add_yaneuraou_engine(yaneuraou yaneuraou_start EVAL_NNUE_HALFKP256 "")
+add_yaneuraou_engine(yaneuraou yaneuraou_start V900 EVAL_NNUE_HALFKP256 "")
 
 # AobaNNUE(アプリ内ダウンロード、halfkp_768x2-16-64)。
 # ヘッダ名だけを渡し、実体は native/arch/ を include パスから解決する。
-add_yaneuraou_engine(aobannue aobannue_start "" "halfkp_768x2-16-64.h")
+add_yaneuraou_engine(aobannue aobannue_start V900 "" "halfkp_768x2-16-64.h")
+
+# つようら王11mini(アプリ内ダウンロード、Pro 限定、SFNN_ka2_4096_8_64_progress8)。
+# SFNN 系なので SFNNwoPSQT を全ソースに付ける。V9.00 には ka2 / progress8 が無いため、
+# このバイナリだけ 9.80git(native/third_party/YaneuraOu-tsuyoura)でビルドする(Issue #346)。
+add_yaneuraou_engine(tsuyoura tsuyoura_start V980 "" "SFNN_ka2_4096_8_64_progress8.h" SFNNwoPSQT)

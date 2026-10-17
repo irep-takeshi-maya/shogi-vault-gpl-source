@@ -1,0 +1,200 @@
+diff --git a/source/position.cpp b/source/position.cpp
+index 96a849c3..e1f6db19 100644
+--- a/source/position.cpp
++++ b/source/position.cpp
+@@ -661,7 +661,17 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
+ #endif
+ 
+ #if defined(USE_CLASSIC_EVAL)
+-    Eval::compute_eval(*this);
++    // 🩹 shogi-vault独自パッチ(Issue #231, go mate/DFPN詰将棋対応):
++    //     HalfKP系NNUEの特徴量インデックスは双方の玉の位置(kingSquare)を
++    //     前提に構築されており、詰将棋の出題局面のように攻め方に玉が存在しない
++    //     (kingSquare[color] == SQ_NB)場合、このあと呼ばれる特徴量計算が
++    //     範囲外配列アクセスを起こしクラッシュする(refresh_accumulator()内で
++    //     weights_[offset+j]がOOBアクセスになる)。
++    //     詰将棋のDFPN探索はEval::evaluate()を一切使わないため、玉のない局面では
++    //     ここでの評価値の事前計算(compute_eval)自体を安全にスキップしてよい。
++    //     通常対局(双方に玉がある局面)の挙動には一切影響しない。
++    if (kingSquare[BLACK] != SQ_NB && kingSquare[WHITE] != SQ_NB)
++        Eval::compute_eval(*this);
+ #endif
+ 
+     // --- validation
+diff --git a/source/usi.cpp b/source/usi.cpp
+index 5eacb567..365c1d50 100644
+--- a/source/usi.cpp
++++ b/source/usi.cpp
+@@ -12,6 +12,12 @@
+ #include "engine.h"
+ #include "movegen.h"
+ 
++#if defined(USE_MATE_DFPN)
++// 🩹 shogi-vault独自拡張(Issue #231): "go mate"用のDFPN詰将棋ソルバー。
++#include "mate/mate.h"
++#include <thread>
++#endif
++
+ #if defined(__EMSCRIPTEN__)
+ // yaneuraou.wasm
+ #include <emscripten.h>
+@@ -627,6 +633,25 @@ Search::LimitsType USIEngine::parse_limits(std::istream& is) {
+ 
+ void USIEngine::go(std::istringstream& is)
+ {
++#if !STOCKFISH && defined(USE_MATE_DFPN)
++	// 🩹 shogi-vault独自拡張(Issue #231): "go mate <ms> [nodes N] [mem M]"は、
++	//     通常のαβ探索(このあとのparse_limits()以降の処理)とは完全に独立した
++	//     DFPN詰将棋探索の経路。先頭トークンが"mate"の場合のみ分岐し、
++	//     それ以外の既存go処理(通常局面のAI解析等)には一切影響を与えない。
++	{
++		auto        pos_before = is.tellg();
++		std::string first_token;
++		is >> first_token;
++		if (first_token == "mate")
++		{
++			go_mate(is);
++			return;
++		}
++		is.clear();
++		is.seekg(pos_before);
++	}
++#endif
++
+     Search::LimitsType limits = parse_limits(is);
+ 
+ 	if (limits.perft)
+@@ -659,6 +684,115 @@ void USIEngine::go(std::istringstream& is)
+ #endif
+ }
+ 
++#if !STOCKFISH && defined(USE_MATE_DFPN)
++// 🩹 shogi-vault独自拡張(Issue #231): "go mate <ms> [nodes N] [mem M]" handler。
++//
++//     詰将棋(終盤研究)の出題局面のように攻め方に玉が存在しない局面は、通常のgo()
++//     (αβ探索, Eval::evaluate()を用いる)では扱えない。DFPN詰将棋ソルバー
++//     (Mate::Dfpn::MateDfpnSolver)は評価関数を一切使わない純粋な探索なので、
++//     玉のない局面でも安全に呼び出せる(Position::set()側の対応込みでPoC検証済み。
++//     native/README.md「詰将棋(go mate)対応」を参照)。
++//
++//     実装はYaneuraOu本家の詰将棋専用エディション(YANEURAOU_MATE_ENGINE,
++//     engine/yaneuraou-mate-engine/yaneuraou-mate-search.cpp)のWorker実装を参考に、
++//     同じ設計(別スレッドでmate_dfpn()を呼び出しつつ主スレッドでtime_up()を
++//     ポーリングする)を踏襲している。
++//
++//     ⚠ 既知の制限: DFPN探索本体(mate_dfpn())には協調的な中断の仕組みがない
++//     (本家実装も同様)。そのため、時間切れで"checkmate timeout"を返す場合でも、
++//     内部的には探索スレッドの自然終了(ノード数上限 or メモリ枯渇 or 解けた)まで
++//     待ってから応答する。ノード数・メモリ上限を保守的な値にすることで実質的な
++//     上限としている(詳細はPRの説明を参照)。
++void USIEngine::go_mate(std::istringstream& is)
++{
++    // "go mate <ms>"の<ms>はUSIプロトコル上「手数」ではなく「探索に使う時間[ms]」。
++    // 空 or "infinite"なら時間無制限(ノード数/メモリ上限のみで打ち切る)。
++    std::string token;
++    is >> token;
++    // ⚠ このプロジェクトはNO_EXCEPTIONS/-fno-exceptionsでビルドされるためstoll()は使えない。
++    TimePoint time_limit_ms = 0;  // 0 = 時間無制限
++    if (!token.empty() && token != "infinite")
++        time_limit_ms = (TimePoint) std::atoll(token.c_str());
++
++    // やねうら王拡張トークン: "nodes N" でDFPN探索のノード数上限、
++    // "mem M" でDFPN用メモリ[MB]を指定できる(test dfpnコマンドと同様の記法)。
++    // モバイル端末の低スペック機を想定し、既定値は控えめにしてある
++    // (Issue #231調査コメント参照)。
++    u64 nodes_limit = 5000000;  // 既定500万ノード
++    u64 mem_mb       = 128;      // 既定128MB
++    while (is >> token)
++    {
++        if (token == "nodes")
++            is >> nodes_limit;
++        else if (token == "mem")
++            is >> mem_mb;
++    }
++
++    Position& pos = engine.get_position();
++
++    Mate::Dfpn::MateDfpnSolver dfpn(Mate::Dfpn::DfpnSolverType::Node64bit);
++    dfpn.alloc(mem_mb);
++
++    std::atomic<Move> result(Move::resign());
++    std::thread        search_thread([&]() { result = dfpn.mate_dfpn(pos, (u32) nodes_limit); });
++
++    ElapsedTimer timer;
++    timer.reset();
++    TimePoint    last_pv_output = 0;
++    constexpr TimePoint kPvIntervalMs = 1000;
++
++    auto time_up = [&]() { return time_limit_ms > 0 && timer.elapsed() >= time_limit_ms; };
++
++    // 探索の終了(または時間切れ)を待つ。時間切れになっても探索スレッド自体は
++    // 中断できないため(上記コメント参照)、join()で自然終了を待ってから応答する。
++    while (result.load() == Move::resign() && !time_up())
++    {
++        Tools::sleep(50);
++
++        auto elapsed = timer.elapsed();
++        if (elapsed > last_pv_output + kPvIntervalMs)
++        {
++            last_pv_output          = elapsed;
++            u64 nodes_searched      = dfpn.get_nodes_searched();
++            u64 nps = elapsed > 0 ? nodes_searched * 1000 / elapsed : 0;
++            sync_cout << "info time " << elapsed << " nodes " << nodes_searched << " nps " << nps
++                       << sync_endl;
++        }
++    }
++
++    bool timed_out = time_up() && result.load() == Move::resign();
++
++    search_thread.join();
++
++    if (timed_out)
++    {
++        sync_cout << "checkmate timeout" << sync_endl;
++        return;
++    }
++
++    Move m = result.load();
++    if (m == Move::none())
++    {
++        // 不明(ノード数上限 or メモリ枯渇等で解を確定できなかった)。
++        if (dfpn.is_out_of_memory())
++            sync_cout << "info string Out Of Memory." << sync_endl;
++        else if (dfpn.get_nodes_searched() >= nodes_limit)
++            sync_cout << "info string Exceeded NodesLimit." << sync_endl;
++        sync_cout << "checkmate none" << sync_endl;
++    }
++    else if (m == Move::null())
++    {
++        // 不詰みが証明された。
++        sync_cout << "checkmate nomate" << sync_endl;
++    }
++    else
++    {
++        auto pv = dfpn.get_pv();
++        sync_cout << "checkmate" << USIEngine::move(pv) << sync_endl;
++    }
++}
++#endif
++
+ // "bench"コマンドの応答部。
+ void USIEngine::bench(std::istream& args) {
+ 
+diff --git a/source/usi.h b/source/usi.h
+index f6a8d299..beebb7de 100644
+--- a/source/usi.h
++++ b/source/usi.h
+@@ -170,6 +170,13 @@ private:
+     void moves();
+     void getoption(std::istringstream& is);
+     void unittest(std::istringstream& is);
++
++#if defined(USE_MATE_DFPN)
++	// 🩹 shogi-vault独自拡張(Issue #231): "go mate <ms> [nodes N] [mem M]"のhandler。
++	//     DFPN詰将棋ソルバーを呼び出し、標準USIの"checkmate"応答フォーマットで返す。
++	//     通常のgo()とは独立した処理経路であり、go()側からのみ呼び出される。
++	void go_mate(std::istringstream& is);
++#endif
+ #endif
+ 
+ 	// 読み筋を出力するevent handler

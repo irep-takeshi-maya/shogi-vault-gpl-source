@@ -1,0 +1,20 @@
+diff --git a/source/history.h b/source/history.h
+index c75f2c8..fe00019 100644
+--- a/source/history.h
++++ b/source/history.h
+@@ -23,7 +23,14 @@ namespace YaneuraOu {
+ // -----------------------
+ 
+ // 歩の陣形に対するhistoryのサイズ
+-constexpr int PAWN_HISTORY_BASE_SIZE   = 8192;  // has to be a power of 2
++// 🩹 shogi-vault独自パッチ(Issue #281): 8192 -> 1024。
++//   PawnHistory は「スレッド数 x この値」個の要素を持つ(SharedHistories)。
++//   将棋では1要素が PIECE_NB x SQUARE_NB x 2B = 約5KB あり、8192 だと
++//   1スレッドあたり約40MB になる(V9.00 の 512 では約2.6MB)。モバイルでは
++//   メモリ上限(iOS の jetsam)に効くので、Stockfish 2025/11 のキャッチアップ
++//   (4849319d)で 8192 に広げられる前にやねうら王が使っていた 1024(a5c84b4c)に戻す。
++//   探索の結果は変わる(本家の値から外れる)。
++constexpr int PAWN_HISTORY_BASE_SIZE   = 1024;  // has to be a power of 2
+ constexpr int UINT_16_HISTORY_SIZE     = std::numeric_limits<uint16_t>::max() + 1;
+ // correction historyのサイズ
+ constexpr int CORRHIST_BASE_SIZE       = UINT_16_HISTORY_SIZE;

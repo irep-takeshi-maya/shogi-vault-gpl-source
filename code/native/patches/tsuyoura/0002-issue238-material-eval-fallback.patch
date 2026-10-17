@@ -1,0 +1,31 @@
+diff --git a/source/eval/nnue/evaluate_nnue.cpp b/source/eval/nnue/evaluate_nnue.cpp
+index 1af65ede..3b15c573 100644
+--- a/source/eval/nnue/evaluate_nnue.cpp
++++ b/source/eval/nnue/evaluate_nnue.cpp
+@@ -968,6 +968,26 @@ Value compute_eval(const Position& pos) {
+ 
+ // 評価関数
+ Value evaluate(const Position& pos) {
++    // 🩹 shogi-vault独自パッチ(Issue #238, 終盤研究「次の一手」の部分図対応):
++    //     HalfKP系NNUEの特徴量計算は双方の玉の位置(kingSquare)を前提に
++    //     構築されており、片方または両方の玉が盤上にない局面
++    //     (kingSquare[color] == SQ_NB)でNNUE forward passを呼ぶと
++    //     refresh_accumulator()内で範囲外配列アクセスを起こしクラッシュする
++    //     (Issue #238調査コメント参照)。指し手生成・王手判定・置換表等の
++    //     探索インフラ自体はSQ_NB_PLUS1サイズの配列で玉なし局面をもともと
++    //     想定した設計になっており(types.h の SQ_NB_PLUS1 コメント参照)、
++    //     玉なし局面で評価値の計算だけができない状態だった。このため、
++    //     玉が片方でも盤上にないときはNNUEを一切呼ばず、常に差分更新されて
++    //     いる駒得値(materialValue)を代わりに返す(符号の手番視点変換は
++    //     eval/material/evaluate_material.cppの駒得のみ評価関数と同じ)。
++    //     詰み・玉の安全度の概念が成立しない局面(終盤研究「次の一手」の
++    //     部分図等)向けの簡易フォールバックであり、双方に玉がある通常局面の
++    //     挙動には一切影響しない。
++    if (pos.square<KING>(BLACK) == SQ_NB || pos.square<KING>(WHITE) == SQ_NB) {
++        Value score = pos.state()->materialValue;
++        return pos.side_to_move() == BLACK ? score : -score;
++    }
++
+     const auto& accumulator = pos.state()->accumulator;
+     if (accumulator.computed_score) {
+         return accumulator.score;

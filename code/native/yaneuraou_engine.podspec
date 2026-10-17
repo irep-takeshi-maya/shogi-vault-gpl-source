@@ -4,6 +4,7 @@
 #
 # ソース一覧・共通設定は engine_sources.rb に集約してある(AobaNNUE 用の
 # aobannue_engine.podspec と共有)。
+# YaneuraOu は V9.00(native/third_party/YaneuraOu、:v900)を使う(Issue #346)。
 require_relative 'engine_sources'
 
 Pod::Spec.new do |s|
@@ -18,7 +19,7 @@ Pod::Spec.new do |s|
   s.platform         = :ios, '14.0'
   s.requires_arc     = false
 
-  s.source_files = YaneuraOuEngineSources.source_files
+  s.source_files = YaneuraOuEngineSources.source_files(:v900)
 
   # Dart(dart:ffi)から dlsym する公開ヘッダ。
   s.public_header_files = 'bridge/engine_bridge.h'
@@ -27,6 +28,7 @@ Pod::Spec.new do |s|
   # 小型 k-p アーキなので nn.bin のアーキハッシュ不一致で読込失敗し exit する。
   # 評価関数は実行時に EvalDir から読むため EVAL_EMBEDDING は付けない。
   s.pod_target_xcconfig = YaneuraOuEngineSources.xcconfig(
-    'EVAL_NNUE_HALFKP256=1 YANEURAOU_BRIDGE_SYMBOL=yaneuraou_start'
+    'EVAL_NNUE_HALFKP256=1 YANEURAOU_BRIDGE_SYMBOL=yaneuraou_start',
+    :v900
   )
 end
