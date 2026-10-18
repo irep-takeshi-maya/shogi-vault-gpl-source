@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-platform :ios, '13.0'
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -9,6 +9,28 @@ project 'Runner', {
   'Profile' => :release,
   'Release' => :release,
 }
+
+def verify_eval_asset
+  # NNUE評価関数(水匠5 nn.bin)は.gitignore対象で scripts/fetch_eval.sh が
+  # 個別に取得する。git worktree add で作った新規ディレクトリにはこの種の
+  # gitignore対象ファイルが含まれないため、取得を忘れたまま pod install /
+  # ビルドを進めると、評価関数抜きの壊れたアプリがサイレントに出来上がる
+  # (2026-08-13に実際に発生し、欠陥ビルドをPlay Console提出まで
+  # してしまった事故がある。plan/21_release_checklist.md 参照)。
+  eval_path = File.expand_path(File.join('..', 'assets', 'eval', 'nn.bin'), __dir__)
+  min_size = 10_000_000 # 実サイズは約61MB。取得失敗・途中切れを検知できれば十分な閾値。
+  unless File.exist?(eval_path) && File.size(eval_path) >= min_size
+    raise <<~MSG
+      評価関数 assets/eval/nn.bin が見つからないか、サイズが不正です。
+      (git worktree add で作った新規ディレクトリでは特に発生しやすい既知の詰まりどころです)
+
+      次のコマンドを実行してから、再度ビルドしてください:
+        bash scripts/fetch_eval.sh
+    MSG
+  end
+end
+
+verify_eval_asset
 
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
@@ -34,7 +56,12 @@ target 'Runner' do
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
   # 組込みエンジン(YaneuraOu + ソケットブリッジ)をアプリにコンパイル/リンクする。
-  pod 'yaneuraou_engine', :path => '../native'
+  # 評価関数のアーキテクチャは本体にビルド時固定で焼き込まれるため、
+  # アーキテクチャごとに別の pod = 別バイナリになる(Issue #134/#282)。
+  # エントリ関数名は yaneuraou_start / aobannue_start / tsuyoura_start で分けてある。
+  pod 'yaneuraou_engine', :path => '../native'   # 水匠5  (halfkp_256x2-32-32)
+  pod 'aobannue_engine', :path => '../native'    # AobaNNUE(halfkp_768x2-16-64)
+  pod 'tsuyoura_engine', :path => '../native'    # つようら王11mini(SFNN_ka2_4096_8_64_progress8)
 
   target 'RunnerTests' do
     inherit! :search_paths

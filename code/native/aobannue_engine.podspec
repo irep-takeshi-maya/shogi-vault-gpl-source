@@ -12,6 +12,7 @@
 #
 # アーキテクチャ定義は submodule を改変せず、本体の nnue_architecture.h が持つ
 # `NNUE_ARCHITECTURE_HEADER` フック経由で native/arch/ のヘッダを読ませる。
+# YaneuraOu は V9.00(native/third_party/YaneuraOu、:v900)を使う(Issue #346)。
 require_relative 'engine_sources'
 
 Pod::Spec.new do |s|
@@ -26,12 +27,13 @@ Pod::Spec.new do |s|
   s.platform         = :ios, '14.0'
   s.requires_arc     = false
 
-  s.source_files = YaneuraOuEngineSources.source_files
+  s.source_files = YaneuraOuEngineSources.source_files(:v900)
 
   s.public_header_files = 'bridge/engine_bridge.h'
 
   s.pod_target_xcconfig = YaneuraOuEngineSources.xcconfig(
     'NNUE_ARCHITECTURE_HEADER=\\"halfkp_768x2-16-64.h\\" ' \
-    'YANEURAOU_BRIDGE_SYMBOL=aobannue_start'
+    'YANEURAOU_BRIDGE_SYMBOL=aobannue_start',
+    :v900
   )
 end

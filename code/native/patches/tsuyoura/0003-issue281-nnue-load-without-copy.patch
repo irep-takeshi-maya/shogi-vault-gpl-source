@@ -1,0 +1,77 @@
+diff --git a/source/eval/nnue/evaluate_nnue.cpp b/source/eval/nnue/evaluate_nnue.cpp
+index 3b15c57..d874be3 100644
+--- a/source/eval/nnue/evaluate_nnue.cpp
++++ b/source/eval/nnue/evaluate_nnue.cpp
+@@ -398,8 +398,17 @@ namespace {
+ 		if (!stream || stream.peek() != std::ios::traits_type::eof())
+ 			return Tools::ResultCode::FileCloseError;
+ 
++#if SHM_HAS_SYSTEM_BACKEND
+ 		// 共有メモリに配置（同一ハッシュの共有メモリが既に存在すればそちらを参照）
+ 		shared_networks = SystemWideSharedConstant<NnueNetworks>(*tmp);
++#else
++		// 🩹 shogi-vault独自パッチ(Issue #281): 共有メモリの無い環境(macOS/iOS/Android)では複製せずに引き取る。
++		//   複製すると読み込み時にネットワーク2つ分を確保し、macOS/iOS では解放した
++		//   tmp のページが dirty のまま残る(AobaNNUE で約184MB)。
++		//   先に古いネットワークを解放してから差し替え、ピークも1つ分に抑える。
++		shared_networks = SystemWideSharedConstant<NnueNetworks>();
++		shared_networks = SystemWideSharedConstant<NnueNetworks>::adopt_local(std::move(tmp));
++#endif
+ 
+ 		return Tools::ResultCode::Ok;
+ 	}
+diff --git a/source/shm.h b/source/shm.h
+index 5243ea7..355447a 100644
+--- a/source/shm.h
++++ b/source/shm.h
+@@ -434,6 +434,9 @@ class SharedMemoryBackend {
+ 
+ #else
+ 
++    // 🩹 shogi-vault独自パッチ(Issue #281): このプラットフォームには共有メモリの実装が無い。
++    #define SHM_HAS_SYSTEM_BACKEND 0
++
+ // For systems that don't have shared memory, or support is troublesome.
+ // The way fallback is done is that we need a dummy backend.
+ 
+@@ -458,6 +461,10 @@ class SharedMemoryBackend {
+ 
+ #endif
+ 
++#if !defined(SHM_HAS_SYSTEM_BACKEND)
++    #define SHM_HAS_SYSTEM_BACKEND 1
++#endif
++
+ template<typename T>
+ struct SharedMemoryBackendFallback {
+     SharedMemoryBackendFallback() = default;
+@@ -465,6 +472,10 @@ struct SharedMemoryBackendFallback {
+     SharedMemoryBackendFallback(const std::string&, const T& value) :
+         fallback_object(make_unique_large_page<T>(value)) {}
+ 
++    // 🩹 shogi-vault独自パッチ(Issue #281): 読み込み済みのオブジェクトを複製せずに引き取る。
++    explicit SharedMemoryBackendFallback(LargePagePtr<T>&& object) noexcept :
++        fallback_object(std::move(object)) {}
++
+     void* get() const { return fallback_object.get(); }
+ 
+     SharedMemoryBackendFallback(const SharedMemoryBackendFallback&)            = delete;
+@@ -548,6 +559,18 @@ struct SystemWideSharedConstant {
+         }
+     }
+ 
++    // 🩹 shogi-vault独自パッチ(Issue #281): 共有メモリを使わず、確保済みのオブジェクトをそのまま保持する。
++    //   共有メモリの実装が無い環境(SHM_HAS_SYSTEM_BACKEND == 0)では、通常の
++    //   コンストラクタは value の複製をもう1つ作るだけになる。大きな評価関数では
++    //   読み込み時に一時的に2倍のメモリを確保し、さらに macOS/iOS では解放した
++    //   側のページが malloc に dirty のまま残る(phys_footprint に乗る)ため、
++    //   複製を避けるための経路。
++    static SystemWideSharedConstant adopt_local(LargePagePtr<T>&& object) {
++        SystemWideSharedConstant c;
++        c.backend = SharedMemoryBackendFallback<T>(std::move(object));
++        return c;
++    }
++
+     SystemWideSharedConstant(const SystemWideSharedConstant&)            = delete;
+     SystemWideSharedConstant& operator=(const SystemWideSharedConstant&) = delete;
+ 

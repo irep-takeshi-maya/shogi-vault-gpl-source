@@ -19,6 +19,29 @@
 - 著作権: yaneurao および貢献者
 - 由来: Stockfish / Apery / SilentMajority の派生物(そのためGPLv3)
 - 取得元: <https://github.com/yaneurao/YaneuraOu>
+- バージョン: **エンジンによって2つの版を使い分けている**(shogi-vault Issue #346、2026-10-17)。
+
+  | エンジン | YaneuraOu の版 | 取得元コミット | 配置先(本リポジトリ) | アプリ固有の改変(patch) |
+  |---|---|---|---|---|
+  | 水匠5(同梱)・AobaNNUE(アプリ内DL) | **`V9.00`**(GitHub の安定版) | `a5ee2786` | `code/native/third_party/YaneuraOu` | `code/native/patches/*.patch` |
+  | つようら王11mini(アプリ内DL、Pro) | **`9.80git`**(開発版、master) | `c1b80eaa` | `code/native/third_party/YaneuraOu-tsuyoura` | `code/native/patches/tsuyoura/*.patch` |
+
+  - V9.00: 2026-09時点で pin を `v8.60git`(`eb2856f9`)から shogi-vault Issue #134 の方針に
+    基づき更新した。V9.00はStockfish本家に合わせた大規模リファクタ(全シンボルが
+    `namespace YaneuraOu`配下に移動、`Options`/`Threads`等のグローバルオブジェクトが廃止され
+    `Engine`/`IEngine`クラスのメンバへ移行等)を含むが、評価関数(水匠5)は変更なし。
+  - 9.80git: つようら王11mini の評価関数(SFNN `ka2` / `progress8`)を読める安定版がまだ無いため、
+    **つようら王11mini 用のバイナリだけ**を master `c1b80eaa`(2026-09-14、`ENGINE_VERSION "9.80git"`)
+    でビルドしている。水匠5・AobaNNUE のバイナリは V9.00 のまま。
+  - 取得手順は [`EXTERNAL_RESOURCES.md`](EXTERNAL_RESOURCES.md)、ビルド手順は
+    [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md) を参照。
+- アプリ固有の改変は patch として管理し、ソースの版ごとに分けている。いずれも GPLv3 の
+  やねうら王への改変であり、**両方の版のソースと両方の patch を対応ソースに含める**
+  (patch の全文は `code/native/patches/`)。
+  - V9.00 用(`code/native/patches/`): go mate(0001)、玉なし局面の駒得フォールバック(0002)
+  - 9.80git 用(`code/native/patches/tsuyoura/`): go mate(0001)、玉なし局面の駒得フォールバック(0002)、
+    評価関数読み込み時の複製の回避(0003)、PawnHistory の大きさ(0004)。0001/0002 は V9.00 用と
+    同じ内容を 9.80git のソースに合わせて作り直したもの
 
 ### 評価関数(NNUE): 水匠5(Suisho5)
 
@@ -30,6 +53,78 @@
 - 本アプリでは `nn.bin` をリポジトリに含めず、`scripts/fetch_eval.sh` でビルド前に
   取得してアプリへ同梱する。推奨 `FV_SCALE=24`。
 - 別の評価関数へ差し替えた場合は本項を更新する。
+
+### 評価関数(NNUE): AobaNNUE(アプリ内ダウンロード、shogi-vault Issue #282)
+
+- ライセンス: **GPLv3**
+- アーキテクチャ: NNUE HalfKP 768x2-16-64
+- ファイル: `nn.bin`(約184MB)
+- 取得元: <https://github.com/yssaya/AobaNNUE>
+- 著作者: 山下 宏(yssaya)氏
+- **アプリには同梱せず、ユーザーの操作でアプリ内ダウンロードして導入する**。
+- 本アプリからの再配布先:
+  <https://github.com/irep-takeshi-maya/shogi-vault-gpl-source/releases/tag/aobannue-eval-v1.1>
+  (原典のファイルを内容を変えずに再配布。SHA-256 等は [`EXTERNAL_RESOURCES.md`](EXTERNAL_RESOURCES.md) の 2-b)
+- 推奨 `FV_SCALE=40`。
+- 再配布の根拠: 著作者が2026-09-27に「nn.bin も GPLv3」と明言している
+  (<http://www.yss-aya.com/bbs/patio.cgi?read=210>)。
+- 本評価関数を読むために、専用のエンジンバイナリ(`halfkp_768x2-16-64` でビルドした
+  `libaobannue.so` / `aobannue_engine.framework`、やねうら王 V9.00)を同梱している。
+  アーキテクチャ定義ヘッダ `code/native/arch/halfkp_768x2-16-64.h` は AobaNNUE 同梱
+  ソース由来(GPLv3)で、include パスのみ書き換えている。
+
+### 評価関数(NNUE): つようら王11mini(アプリ内ダウンロード、Pro 限定、shogi-vault Issue #346)
+
+- ライセンス: **MIT License**(`nn.bin`・`progress.bin` とも)
+- 著作権: やねうら王プロジェクト(yaneurao)
+- アーキテクチャ: SFNN `SFNN_ka2_4096_8_64_progress8`(進行度つき)
+- ファイル: `nn.bin`(7,711,372バイト)と `progress.bin`(1,003,104バイト)
+- 取得元: <https://yaneurao.fanbox.cc/posts/12761272>(2026-10-14 の全体公開記事)。
+  配布アーカイブ
+  `TuyouraOu11mini-SFNN_ka2_4096_8_64_progress8-epoch0010-20261003.7z`
+  (<https://storage.yaneu.com/yaneuraou/>)から `nn.bin` と `progress.bin` だけを取り出して使う
+- 配布元の記事は「MIT License」「二次配布・商用利用可」と明記しているが、
+  アーカイブにライセンス文と著作権表示行は含まれていない。下記の著作権表示は、
+  アーカイブ内 `tag.json` の作者表記(「やねうら王プロジェクト」)と公開年から記載したもの
+- **アプリには同梱せず、Pro プランのユーザーがアプリ内ダウンロードで導入する**。
+  再配布先: 本リポジトリの Releases、タグ `tsuyoura11mini-eval-20261003`
+  (<https://github.com/irep-takeshi-maya/shogi-vault-gpl-source/releases/tag/tsuyoura11mini-eval-20261003>。
+  SHA-256 は [`EXTERNAL_RESOURCES.md`](EXTERNAL_RESOURCES.md) の 2-c)
+- 推奨 `FV_SCALE=24`。アーカイブ内の `eval_options.txt` は置かない
+  (エンジンが自動で読んで FV_SCALE を上書きするため、アプリから送る値に一本化する)
+- 本評価関数を読むために、**専用のエンジンバイナリ**を同梱している
+  (`SFNN_ka2_4096_8_64_progress8` と `SFNNwoPSQT` でビルドした `libtsuyoura.so` /
+  `tsuyoura_engine.framework`)。エンジン本体はやねうら王(GPLv3)だが、他の2つ(V9.00)と違い
+  **9.80git(master `c1b80eaa`)** でビルドしている(上記「YaneuraOu」の表)。組込みの方式
+  (プロセス内リンク、評価関数は実行時ロード)は他の2つと同じ。対応ソースの提供義務は
+  下記「対応するソース(Corresponding Source)の提供」に従う
+- アーキテクチャ定義ヘッダ `code/native/arch/SFNN_ka2_4096_8_64_progress8.h` は、やねうら王 9.80git(`c1b80eaa`)の
+  `source/eval/nnue/architectures/nnue_arch_gen.py` で生成したもの(GPLv3 のやねうら王の一部)。
+  include パスのみ本リポジトリの配置に合わせて書き換えている
+
+```
+MIT License
+
+Copyright (c) 2026 やねうら王プロジェクト (yaneurao)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ### Stockfish(上流)
 
@@ -94,9 +189,11 @@ GPLv3 第6条に基づき、配布したバイナリに対応する完全なソ�
 **このリポジトリ自体が、その対応ソース(エンジン統合部分)である**。アプリ本体の
 ソースは独自ライセンスのため非公開。
 
-- エンジン統合部分の対応ソース(engine_bridge・ビルド設定・評価関数取得スクリプト・
-  GPLv3全文): [`README.md`](README.md) 参照
-- やねうら王本体: [`EXTERNAL_RESOURCES.md`](EXTERNAL_RESOURCES.md) に記載の pin コミット
+- エンジン統合部分の対応ソース(engine_bridge・ビルド設定・やねうら王への patch と
+  その適用スクリプト・評価関数取得スクリプト・GPLv3全文): [`README.md`](README.md) 参照
+- やねうら王本体: [`EXTERNAL_RESOURCES.md`](EXTERNAL_RESOURCES.md) に記載の pin コミット。
+  **V9.00(`a5ee2786`、水匠5・AobaNNUE)と 9.80git(`c1b80eaa`、つようら王11mini)の2つ**を、
+  それぞれに当てる patch(`code/native/patches/` と `code/native/patches/tsuyoura/`)とともに記載する
 - 各リリースの対応コミット・タグは、リリースごとに本リポジトリを更新して記載する。
 
 ## 未確定事項(出荷前に確定すること)
