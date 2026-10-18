@@ -226,4 +226,8 @@ add_yaneuraou_engine(aobannue aobannue_start V900 "" "halfkp_768x2-16-64.h")
 # つようら王11mini(アプリ内ダウンロード、Pro 限定、SFNN_ka2_4096_8_64_progress8)。
 # SFNN 系なので SFNNwoPSQT を全ソースに付ける。V9.00 には ka2 / progress8 が無いため、
 # このバイナリだけ 9.80git(native/third_party/YaneuraOu-tsuyoura)でビルドする(Issue #346)。
-add_yaneuraou_engine(tsuyoura tsuyoura_start V980 "" "SFNN_ka2_4096_8_64_progress8.h" SFNNwoPSQT)
+# USE_PTHREADS: 探索スレッドを std::thread(Android の既定スタックは約1MB)ではなく
+# 8MB スタックの pthread で作らせる(thread_win32_osx.h。Apple では元から有効)。
+# SFNN は局面ごとの状態が大きく、1MB では SearchManager::pv() でスタックが溢れて
+# SIGSEGV になる(Galaxy A20 実機で、解析開始直後に毎回落ちた)。
+add_yaneuraou_engine(tsuyoura tsuyoura_start V980 "" "SFNN_ka2_4096_8_64_progress8.h" SFNNwoPSQT USE_PTHREADS)
