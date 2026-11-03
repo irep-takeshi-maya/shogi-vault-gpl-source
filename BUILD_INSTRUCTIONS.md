@@ -44,8 +44,8 @@ patch を手で当てる場合も組み合わせを守ってください。
 
 | ソース | patch |
 |---|---|
-| `third_party/YaneuraOu`(V9.00) | `patches/0001-issue231-go-mate-dfpn.patch`, `patches/0002-issue238-material-eval-fallback.patch` |
-| `third_party/YaneuraOu-tsuyoura`(9.80git) | `patches/tsuyoura/0001-issue231-go-mate-dfpn.patch` 〜 `patches/tsuyoura/0004-issue281-pawn-history-size.patch` |
+| `third_party/YaneuraOu`(V9.00) | `patches/0001-issue231-go-mate-dfpn.patch` 〜 `patches/0004-issue463-tt-alloc-fallback.patch` |
+| `third_party/YaneuraOu-tsuyoura`(9.80git) | `patches/tsuyoura/0001-issue231-go-mate-dfpn.patch` 〜 `patches/tsuyoura/0005-issue463-tt-alloc-fallback.patch` |
 
 `patches/*.patch` は直下のファイルだけが対象で、`patches/tsuyoura/` の中は V9.00 に
 当てません。適用済みの patch はスキップするので、何度実行してもかまいません。

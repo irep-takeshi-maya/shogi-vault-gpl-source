@@ -277,7 +277,12 @@ void engine_thread(std::string ip, int port, std::promise<void> finished) {
 constexpr std::chrono::seconds kPreviousThreadJoinTimeout{5};
 
 std::mutex g_engine_thread_mutex;
-std::thread g_engine_thread;
+// ヒープに確保し、意図的に破棄しない(Issue #444)。エンジンスレッドは
+// アプリの生存中ずっと joinable のまま保持されるため、通常の static 変数に
+// すると exit() 時のデストラクタで std::terminate() になる(iOS で終了時の
+// watchdog タイムアウト後に exit() が走り、SIGABRT として記録されていた)。
+// プロセス終了時はスレッドごと OS が片付けるので、join も detach も要らない。
+std::thread& g_engine_thread = *new std::thread;
 // 直近に起動したエンジンスレッドの終了通知。std::promise は複数箇所から
 // 待てないため、待つ側では get_future().share() した shared_future を保持
 // する。
