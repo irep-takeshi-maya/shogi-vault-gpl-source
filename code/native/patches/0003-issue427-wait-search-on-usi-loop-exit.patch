@@ -1,0 +1,22 @@
+diff --git a/source/usi.cpp b/source/usi.cpp
+index 365c1d50..b4590e06 100644
+--- a/source/usi.cpp
++++ b/source/usi.cpp
+@@ -163,6 +163,17 @@ void USIEngine::loop()
+ 			break;
+ 	}
+ 
++	// 🩹 shogi-vault独自対応(Issue #427): エンジンの終了を待つ。
++	//     上流 master(つようら王用に pin している 9.80git)に入っている修正の
++	//     バックポート。"quit"(ソケット切断による EOF を含む)は engine.stop() で
++	//     停止を指示するだけなので、待たずに戻ると探索スレッドがまだ動いている
++	//     うちにエンジン(YaneuraOuEngine)が破棄される。置換表 tt は
++	//     YaneuraOuEngine のメンバで、スレッドの終了を待つ ThreadPool(基底の
++	//     Engine のメンバ)より先に解放されるため、探索スレッドが解放済みの
++	//     置換表を読んで EXC_BAD_ACCESS になっていた
++	//     (TranspositionTable::hashfull / probe。iOS のバックグラウンド中に発生)。
++	engine.wait_for_search_finished();
++
+ #else
+ 	// yaneuraOu.wasm
+ 	// ここでループしてしまうと、ブラウザのメインスレッドがブロックされてしまう。

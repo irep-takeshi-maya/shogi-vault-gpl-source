@@ -1,0 +1,32 @@
+diff --git a/source/tt.cpp b/source/tt.cpp
+index 88d97105..36c096c6 100644
+--- a/source/tt.cpp
++++ b/source/tt.cpp
+@@ -297,6 +297,27 @@ void TranspositionTable::resize(size_t mbSize, ThreadPool& threads) {
+ 
+ 	table = static_cast<Cluster*>(aligned_large_pages_alloc(clusterCount * sizeof(Cluster)));
+ 
++	// 🩹 shogi-vault独自対応(Issue #463): 確保できなければ、半分にして確保し直す。
++	//     本アプリはエンジンを同じプロセス内で動かすため、下の exit() はアプリ
++	//     ごと終了させてしまう。メモリの少ない端末(iPad 第8世代、空き 227MB)で、
++	//     エンジン起動時の setoption Threads が既定の USI_Hash 1024MB で置換表を
++	//     確保し直そうとして失敗し、研究画面を開いた直後にアプリが落ちていた
++	//     (アプリ側も USI_Hash を先に送るように直した)。置換表は小さくても
++	//     探索はできるので、1MB まで下げて試す。
++	//     clusterCount は偶数でなければならない(TTEntry::first_entry() 参照)。
++	//     次に同じ mbSize で resize() が呼ばれたときは clusterCount が違うので、
++	//     元のサイズでの確保をもう一度試す。
++	const size_t minClusterCount = 1024 * 1024 / sizeof(Cluster);
++	while (!table && clusterCount / 2 >= minClusterCount)
++	{
++		clusterCount = (clusterCount / 2) & ~size_t(1);
++		table = static_cast<Cluster*>(aligned_large_pages_alloc(clusterCount * sizeof(Cluster)));
++		if (table)
++			sync_cout << "info string Warning! Failed to allocate " << mbSize
++			          << "MB for transposition table. Using "
++			          << clusterCount * sizeof(Cluster) / (1024 * 1024) << "MB." << sync_endl;
++	}
++
+ 	if (!table)
+ 	{
+ 		std::cerr << "Failed to allocate " << mbSize << "MB for transposition table." << std::endl;
