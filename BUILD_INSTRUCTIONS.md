@@ -45,7 +45,7 @@ patch を手で当てる場合も組み合わせを守ってください。
 | ソース | patch |
 |---|---|
 | `third_party/YaneuraOu`(V9.00) | `patches/0001-issue231-go-mate-dfpn.patch` 〜 `patches/0004-issue463-tt-alloc-fallback.patch` |
-| `third_party/YaneuraOu-tsuyoura`(9.80git) | `patches/tsuyoura/0001-issue231-go-mate-dfpn.patch` 〜 `patches/tsuyoura/0005-issue463-tt-alloc-fallback.patch` |
+| `third_party/YaneuraOu-tsuyoura`(9.80git) | `patches/tsuyoura/0001-issue231-go-mate-dfpn.patch` 〜 `patches/tsuyoura/0006-go-mate-stack-overflow.patch` |
 
 `patches/*.patch` は直下のファイルだけが対象で、`patches/tsuyoura/` の中は V9.00 に
 当てません。適用済みの patch はスキップするので、何度実行してもかまいません。
@@ -120,7 +120,7 @@ flutter build ios --release
 あります。`position.h` の `StateInfo` の中身(進行度のキャッシュ)が変わるため、
 一部のソースだけに付けると、ソースごとに構造体の大きさが食い違って壊れます。
 
-- CMake: `add_yaneuraou_engine(tsuyoura tsuyoura_start V980 "" "SFNN_ka2_4096_8_64_progress8.h" SFNNwoPSQT)`
+- CMake: `add_yaneuraou_engine(tsuyoura tsuyoura_start V980 "" "SFNN_ka2_4096_8_64_progress8.h" SFNNwoPSQT USE_PTHREADS)`
 - CocoaPods: `tsuyoura_engine.podspec` の `pod_target_xcconfig` に `SFNNwoPSQT=1`
 
 アーキテクチャは `NNUE_ARCHITECTURE_HEADER` に `SFNN_ka2_4096_8_64_progress8.h` を渡し、

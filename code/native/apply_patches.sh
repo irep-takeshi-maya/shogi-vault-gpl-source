@@ -17,8 +17,13 @@
 #   `git submodule update --init --recursive` によるチェックアウトの再現性を
 #   保証しつつ、アプリ固有の改変は patch ファイルとして本リポジトリ側で管理する。
 #
-# 冪等性: 適用済みかどうかを `git apply --check --reverse` で判定し、
-#   二重適用やCI再実行時のエラーを避ける。
+# 冪等性: patch が触るファイルについて、pin のままの内容に patch を1件ずつ当てた結果を
+#   一時ディレクトリで作り、submodule の今の内容が「何件目まで当てた状態」かを調べて、
+#   残りだけを当てる。二重適用やCI再実行時のエラーを避ける。
+#   (以前は patch ごとに `git apply --check --reverse` で判定していたが、後の patch が
+#   前の patch の変更箇所を書き換えると(tsuyoura/0006 は 0001 が足した go_mate() を直す)、
+#   前の patch が未適用に見えて当て直そうとし、失敗して止まる)
+#   どの状態とも一致しない(手で書き換えた等)ときは止まる。
 #
 # 実行タイミング: `git submodule update --init --recursive` の直後、
 #   ビルド(pod install / CMake)より前に必ず実行すること。
@@ -51,18 +56,57 @@ apply_to() {
     return 0
   fi
 
-  local patch name
-  for patch in "${patches[@]}"; do
-    name="$(basename "$patch")"
+  # patch が触るファイル(pin に無いファイル=新規作成は「無い」状態として比べる)
+  local files=()
+  local f
+  while IFS= read -r f; do files+=("$f"); done < <(sed -n 's|^+++ b/||p' "${patches[@]}" | sort -u)
 
-    if git -C "$yo_dir" apply --check --reverse "$patch" >/dev/null 2>&1; then
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/work"
+  for f in "${files[@]}"; do
+    mkdir -p "$tmp/work/$(dirname "$f")"
+    git -C "$yo_dir" show "HEAD:$f" > "$tmp/work/$f" 2>/dev/null || rm -f "$tmp/work/$f"
+  done
+
+  # 今の submodule の内容が、一時ディレクトリの内容と同じか
+  same_as_work() {
+    local g
+    for g in "${files[@]}"; do
+      if [ -e "$tmp/work/$g" ]; then
+        cmp -s "$tmp/work/$g" "$yo_dir/$g" || return 1
+      else
+        [ ! -e "$yo_dir/$g" ] || return 1
+      fi
+    done
+  }
+
+  # k 件目まで当てた状態と一致する k を探す(0 = 何も当てていない)
+  local applied=-1 i
+  same_as_work && applied=0
+  for i in "${!patches[@]}"; do
+    # 一時ディレクトリは Git の作業ディレクトリではないので、git apply はただの patch として当てる
+    (cd "$tmp/work" && GIT_CEILING_DIRECTORIES="$tmp" git apply "${patches[$i]}")
+    same_as_work && applied=$((i + 1))
+  done
+  rm -rf "$tmp"
+
+  if [ "$applied" -lt 0 ]; then
+    echo "エラー: [$label] の内容が、patch を何件目まで当てた状態とも一致しません(手で書き換えた等)。" >&2
+    echo "  git -C \"$yo_dir\" checkout -- . で pin の状態に戻してから、もう一度実行してください。" >&2
+    exit 1
+  fi
+
+  local name
+  for i in "${!patches[@]}"; do
+    name="$(basename "${patches[$i]}")"
+    if [ "$i" -lt "$applied" ]; then
       echo "[$label] 適用済みのためスキップ: $name"
       continue
     fi
-
     echo "[$label] 適用中: $name"
-    git -C "$yo_dir" apply --check "$patch"
-    git -C "$yo_dir" apply "$patch"
+    git -C "$yo_dir" apply --check "${patches[$i]}"
+    git -C "$yo_dir" apply "${patches[$i]}"
   done
 }
 

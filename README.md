@@ -37,7 +37,7 @@
     │   ├── tsuyoura_engine.podspec    # つようら王11mini用(9.80git)
     │   ├── apply_patches.sh     # やねうら王の2つのソースへ patch を当てる
     │   ├── patches/             # V9.00 用 patch(0001〜0004)
-    │   │   └── tsuyoura/        # 9.80git 用 patch(0001〜0005)
+    │   │   └── tsuyoura/        # 9.80git 用 patch(0001〜0006)
     │   ├── arch/                # NNUE アーキテクチャ定義ヘッダ
     │   │   ├── halfkp_768x2-16-64.h
     │   │   └── SFNN_ka2_4096_8_64_progress8.h
