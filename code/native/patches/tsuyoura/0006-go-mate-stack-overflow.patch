@@ -1,0 +1,23 @@
+diff --git a/source/usi.cpp b/source/usi.cpp
+--- a/source/usi.cpp
++++ b/source/usi.cpp
+@@ -756,9 +756,18 @@
+ 
+     Mate::Dfpn::MateDfpnSolver dfpn(Mate::Dfpn::DfpnSolverType::Node64bit);
+     dfpn.alloc(mem_mb);
++
++    // 🩹 shogi-vault独自パッチ(go mate のスタック溢れ): DFPN は手順の1手ごとに ParallelSearch() を
++    //     再帰で呼び、1段ごとに StateInfo(SFNN 構成では NNUE の accumulator が入り 17,024 バイト)を積む。
++    //     std::thread の既定のスタックは macOS/iOS で 512KB、Android で約1MB しかなく、32 段ほど読んだところで
++    //     溢れてアプリごと落ちていた(SIGBUS。駒の多い実戦の終盤で再現)。そこで探索スレッドを、αβ探索と同じ
++    //     8MB スタックの NativeThread で作り(Android は CMake の USE_PTHREADS で有効)、読む深さも
++    //     kMaxDfpnPly 手までに抑える(それより深い手順は不詰扱い。8MB / 17KB ≒ 490 段に対して余裕を持たせる)。
++    constexpr int kMaxDfpnPly = 300;
++    dfpn.set_max_game_ply(pos.game_ply() + kMaxDfpnPly);
+ 
+     std::atomic<Move> result(Move::resign());
+-    std::thread        search_thread([&]() { result = dfpn.mate_dfpn(pos, (u32) nodes_limit); });
++    NativeThread       search_thread([&]() { result = dfpn.mate_dfpn(pos, (u32) nodes_limit); });
+ 
+     ElapsedTimer timer;
+     timer.reset();
