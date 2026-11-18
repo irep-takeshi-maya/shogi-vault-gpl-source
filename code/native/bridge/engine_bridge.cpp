@@ -16,6 +16,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -37,7 +38,42 @@ using namespace YaneuraOu;
 
 namespace {
 
-// ソケット fd への出力 streambuf。std::cout の rdbuf を差し替える。
+// ---------------------------------------------------------------------------
+// std::cin / std::cout の差し替え(Issue #464 / #529)
+//
+// std::cin / std::cout はプロセスに1つしかない。iOS では libc++ がシステムの
+// dylib なので、水匠5・AobaNNUE・つようら王の3つの framework も同じ
+// std::cin / std::cout を使う(-fvisibility=hidden で分かれるのは YaneuraOu
+// 本体のシンボルだけ)。一方、エンジンスレッドの管理(下の g_engine_thread)は
+// framework ごとに別々なので、別の評価関数へ切り替えたときは前のエンジンの
+// 終了を一切待たずに次のエンジンが始まる。同じ framework でも、前のエンジンが
+// kPreviousThreadJoinTimeout 以内に終わらなければ detach して次を始める。
+//
+// 以前は run_engine() のローカル変数の streambuf を std::cin / std::cout に
+// 差し込んでいた。そのため、前のエンジンがまだ動いているうちに次のエンジンが
+// 差し替えると、前のエンジンの探索スレッドや USI ループが次のエンジンの
+// streambuf を使い、次のエンジンが終わってその streambuf(スレッドのスタック)
+// が消えたあとに読み書きして EXC_BAD_ACCESS になっていた
+// (#529: on_update_full の info 出力中、#464: StandardInput::input の getline 中)。
+// 前のエンジンが次のエンジンのソケットからコマンドを横取りすることもあった。
+//
+// そこで:
+// - std::cin / std::cout に差し込む streambuf は framework ごとに1組だけ作り、
+//   破棄しない(どのスレッドがいつ触っても解放済みメモリにならない)。
+// - 接続(Connection)もヒープに置いて破棄しない。fd を閉じるのは、その接続へ
+//   書き込み中のスレッドがいなくなってから(閉じた fd 番号が別のファイルに
+//   再利用され、そこへ書いてしまうのを防ぐ)。
+// - 入力は、その接続の USI ループを回しているスレッド(このファイルの
+//   engine_thread)だけがソケットから読む。それ以外のスレッド(前のエンジン、
+//   別の framework のエンジン)が読もうとしたら "quit" を返して終わらせる。
+//   ソケットの切断(EOF)も "quit" の行として返し、共有の std::cin に
+//   eofbit/failbit を立てない(立つと、同時に動いている次のエンジンの
+//   getline まで失敗して "quit" 扱いになる)。
+// - 出力は、USI ループのスレッドなら自分の接続へ、それ以外(探索スレッド)なら
+//   この framework で今動いている接続へ送る。どの接続にも属さない出力は捨てる。
+// ---------------------------------------------------------------------------
+
+// ソケット1本分。ヒープに確保し、意図的に破棄しない(上のコメント参照)。
 //
 // 🩹 shogi-vault独自対応(Issue #266、実機ログ調査): write() が
 //     kSendTimeout(下記)で失敗した場合、その失敗は std::cout
@@ -52,54 +88,76 @@ namespace {
 //     「次の一手」ボタンを連打すると、EngineController.stop() が
 //     bestmove を[_handshakeTimeout](30秒)待っても受信できない)。
 //
-//     実機でのみ顕在化した理由(仮説): kSendTimeout に到達するには、
-//     ソケットの送信バッファが埋まった状態が10秒間続く必要がある。
-//     シミュレータ(macOSホストの潤沢なCPU/カーネルネットワークスタック)
-//     では、Dart側の受信ループがこれほど長く滞留することはまず無いが、
-//     実機ではリアルタイム解析中の連打で stop→position→go が高頻度に
-//     発生し、大量の info 行出力と Dart 側 UI の再描画(ボタン連打による
-//     再ビルド)が競合してDart側の受信処理が遅延すると、この経路を
-//     踏みうる。
-//
 //     この恒久的沈黙を防ぐため、write() が失敗した場合はソケットを
 //     shutdown(SHUT_RDWR) して明示的に切断する。close() と異なり
-//     shutdown() は「別スレッドが SocketInStreambuf::underflow() の
-//     read() でブロックしている」状態を安全に(Linux/Darwin いずれでも)
-//     解除できるため、USI コマンド受信ループ側の read() が即座に
-//     失敗/EOF を返して USIEngine::loop() が自然終了する。これにより
-//     Dart 側は(無応答のまま [_handshakeTimeout] いっぱい待たされる
-//     代わりに)ソケット切断([EngineProcess.lines] の onDone)を即座に
-//     検知でき、[EngineController] が [EngineStatus.error] へ遷移する
-//     (native/README.md・lib/core/engine/manager/engine_controller.dart
-//     参照)。「出力だけが壊れていて応答できない」半死状態を、既存の
-//     異常終了検知経路に載せ替えることが目的であり、この対応単体では
-//     自動再起動までは行わない(呼び出し元が [EngineStatus.error] や
-//     [EngineController.checkHealthy] の結果を見て再起動する設計は
-//     lib/features/analysis 側に既存)。
-class SocketOutStreambuf : public std::streambuf {
+//     shutdown() は「別スレッドが read() でブロックしている」状態を
+//     安全に(Linux/Darwin いずれでも)解除できるため、USI コマンド受信
+//     ループ側の read() が即座に失敗/EOF を返して USIEngine::loop() が
+//     自然終了する。これにより Dart 側は(無応答のまま [_handshakeTimeout]
+//     いっぱい待たされる代わりに)ソケット切断([EngineProcess.lines] の
+//     onDone)を即座に検知でき、[EngineController] が [EngineStatus.error]
+//     へ遷移する(native/README.md・lib/core/engine/manager/engine_controller.dart
+//     参照)。この対応単体では自動再起動までは行わない(呼び出し元が
+//     [EngineStatus.error] や [EngineController.checkHealthy] の結果を見て
+//     再起動する設計は lib/features/analysis 側に既存)。
+class Connection {
  public:
-  explicit SocketOutStreambuf(int fd) : fd_(fd) {}
+  explicit Connection(int fd) : fd_(fd) {}
 
- protected:
-  int overflow(int c) override {
-    if (c == EOF) return c;
-    const char ch = static_cast<char>(c);
-    return write_all(&ch, 1) ? c : EOF;
+  // n バイトを書く。書けた、または接続が既に閉じていて捨てたときは true。
+  bool write(const char* s, size_t n) {
+    users_.fetch_add(1);
+    bool ok = true;
+    if (!closed_.load()) ok = write_all(s, n);
+    users_.fetch_sub(1);
+    return ok;
   }
-  std::streamsize xsputn(const char* s, std::streamsize n) override {
-    return write_all(s, static_cast<size_t>(n)) ? n : 0;
+
+  // 1バイト読む。切断・エラーなら false。この接続の USI ループのスレッド
+  // だけが呼ぶ(finish() と同じスレッドなので、閉じた fd を読むことはない)。
+  bool read_char(char& ch) {
+    if (closed_.load()) return false;
+    return ::read(fd_, &ch, 1) == 1;
+  }
+
+  // 接続を終わらせる。USI ループを抜けたあと、この接続のスレッドが呼ぶ。
+  // 書き込み中のスレッドがいなくなってから fd を閉じる。
+  void finish() {
+    ::shutdown(fd_, SHUT_RDWR);  // ブロック中の write() もこれで戻る。
+    closed_.store(true);
+    // shutdown 後の write() はすぐ失敗するので、普通は待たずに抜ける。
+    // 念のため上限を設け、待ちきれなければ fd を閉じずに残す(リークは
+    // fd 1つ。閉じた番号が再利用されて別のファイルへ書くよりよい)。
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (users_.load() != 0) {
+      if (std::chrono::steady_clock::now() > deadline) return;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ::close(fd_);
   }
 
  private:
+  static constexpr std::chrono::seconds kDrainTimeout{15};
+
+  // 相手が閉じたソケットへ書いても SIGPIPE でプロセスごと落とさない
+  // (EPIPE として失敗させる)。前のエンジンは自分の(Dart 側が閉じた)接続へ
+  // 書くことがあるため。Linux/Android は send() の MSG_NOSIGNAL、Darwin は
+  // set_socket_options() の SO_NOSIGPIPE で止める。
+#ifdef MSG_NOSIGNAL
+  static constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+  static constexpr int kSendFlags = 0;
+#endif
+
   bool write_all(const char* s, size_t n) {
     size_t off = 0;
     while (off < n) {
-      const ssize_t w = ::write(fd_, s + off, n - off);
+      const ssize_t w = ::send(fd_, s + off, n - off, kSendFlags);
       if (w <= 0) {
         // 書き込み失敗(kSendTimeout到達を含む)。以後この接続で
         // まともな双方向通信は成立しないとみなし、明示的に切断する
-        // (上記コメント参照)。
-        shutdown_once();
+        // (上記コメント参照)。shutdown() は何度呼んでも安全。
+        if (!shutdown_called_.exchange(true)) ::shutdown(fd_, SHUT_RDWR);
         return false;
       }
       off += static_cast<size_t>(w);
@@ -107,36 +165,109 @@ class SocketOutStreambuf : public std::streambuf {
     return true;
   }
 
-  // 書き込み失敗を検知した際に一度だけソケットを切断する。
-  // shutdown() 自体は複数回呼んでも安全(2回目以降は ENOTCONN 等で
-  // 単に失敗するだけ)だが、無駄な syscall を避けるためフラグで抑制する。
-  void shutdown_once() {
-    if (shutdown_called_) return;
-    shutdown_called_ = true;
-    ::shutdown(fd_, SHUT_RDWR);
-  }
-
-  int fd_;
-  bool shutdown_called_ = false;
+  const int fd_;
+  std::atomic<int> users_{0};
+  std::atomic<bool> closed_{false};
+  std::atomic<bool> shutdown_called_{false};
 };
 
-// ソケット fd からの入力 streambuf。std::cin の rdbuf を差し替える。
-class SocketInStreambuf : public std::streambuf {
- public:
-  explicit SocketInStreambuf(int fd) : fd_(fd) {}
+// この framework で今動いているエンジンの接続。無ければ nullptr。
+std::atomic<Connection*> g_current{nullptr};
 
+// このスレッドが USI ループを回している接続(engine_thread の中だけ非 null)。
+// framework ごとに別の変数なので、別の framework のエンジンのスレッドからは
+// nullptr に見える。
+thread_local Connection* t_connection = nullptr;
+
+// std::cout に差し込む streambuf。framework ごとに1つで、破棄しない。
+// バッファを持たず、書くたびに接続へ送る(以前と同じ)。
+class RoutingOutStreambuf : public std::streambuf {
  protected:
-  int underflow() override {
-    const ssize_t n = ::read(fd_, &ch_, 1);
-    if (n <= 0) return EOF;  // 切断で USI ループが終了する。
-    setg(&ch_, &ch_, &ch_ + 1);
-    return static_cast<unsigned char>(ch_);
+  int overflow(int c) override {
+    if (c == EOF) return 0;
+    const char ch = static_cast<char>(c);
+    return put(&ch, 1) ? c : EOF;
+  }
+  std::streamsize xsputn(const char* s, std::streamsize n) override {
+    return put(s, static_cast<size_t>(n)) ? n : 0;
   }
 
  private:
-  int fd_;
-  char ch_ = 0;
+  // false を返すと std::cout に badbit が立つ(#266 の切断検知に使う)。
+  // 立てるのは、今動いている接続への書き込みに失敗したときだけにする。
+  // 前のエンジンの書き込み失敗で、共有の std::cout を止めないため。
+  static bool put(const char* s, size_t n) {
+    Connection* current = g_current.load();
+    Connection* target = t_connection != nullptr ? t_connection : current;
+    if (target == nullptr) return true;  // どの接続にも属さない出力は捨てる。
+    if (target->write(s, n)) return true;
+    return target != current;
+  }
 };
+
+// std::cin に差し込む streambuf。framework ごとに1つで、破棄しない。
+//
+// get area(setg)は使わない。複数のスレッドが同時に getline しても、共有の
+// ポインタがどれかのスレッドのメモリを指すことがないようにするため
+// (#464 は getline が get area を memchr で走査している最中に落ちていた)。
+// 先読みした1文字や、合成した "quit" の残りはスレッドごとに持つ。
+class RoutingInStreambuf : public std::streambuf {
+ protected:
+  int_type underflow() override {
+    State& st = state();
+    if (!st.has_peek) {
+      st.peek = next_char(st);
+      st.has_peek = true;
+    }
+    return st.peek;
+  }
+  int_type uflow() override {
+    State& st = state();
+    if (st.has_peek) {
+      st.has_peek = false;
+      return st.peek;
+    }
+    return next_char(st);
+  }
+  std::streamsize showmanyc() override { return 0; }
+
+ private:
+  struct State {
+    bool has_peek = false;
+    int_type peek = 0;
+    const char* synthetic = nullptr;  // 合成中の "quit\n" の残り
+    bool at_line_start = true;
+  };
+
+  static State& state() {
+    thread_local State st;
+    return st;
+  }
+
+  static int_type next_char(State& st) {
+    if (st.synthetic == nullptr) {
+      Connection* conn = t_connection;
+      char ch;
+      if (conn != nullptr && conn == g_current.load() && conn->read_char(ch)) {
+        st.at_line_start = ch == '\n';
+        return traits_type::to_int_type(ch);
+      }
+      // 切断・前のエンジン・別の framework のスレッド: "quit" の行を返して
+      // USI ループを終わらせる(EOF を返すと共有の std::cin に eofbit/failbit
+      // が立つ。上のコメント参照)。行の途中なら、まず改行で区切る。
+      st.synthetic = st.at_line_start ? "quit\n" : "\nquit\n";
+    }
+    const char ch = *st.synthetic++;
+    if (*st.synthetic == '\0') st.synthetic = nullptr;
+    st.at_line_start = ch == '\n';
+    return traits_type::to_int_type(ch);
+  }
+};
+
+// 破棄しない(exit() 時のデストラクタで、まだ動いているスレッドから
+// 触られないように。Issue #444 と同じ考え方)。
+RoutingOutStreambuf& g_out = *new RoutingOutStreambuf;
+RoutingInStreambuf& g_in = *new RoutingInStreambuf;
 
 // YaneuraOu を初期化し、ソケットを標準入出力に見立てて USI ループを回す。
 //
@@ -162,11 +293,13 @@ class SocketInStreambuf : public std::streambuf {
 // Threads を直接操作する必要はなくなった(README/CHANGELOG も参照)。
 // `run_engine_entry()` は内部の `USIEngine::loop()` が "quit" を受け取るまで
 // 戻らない(=関数呼び出しがブロックする)。
-void run_engine(int fd) {
-  SocketOutStreambuf out(fd);
-  SocketInStreambuf in(fd);
-  std::cout.rdbuf(&out);
-  std::cin.rdbuf(&in);
+void run_engine(Connection* conn) {
+  t_connection = conn;
+  g_current.store(conn);
+  // rdbuf() の差し替えは、ストリームの状態(前の接続での書き込み失敗による
+  // badbit 等)のクリアも兼ねる。
+  std::cout.rdbuf(&g_out);
+  std::cin.rdbuf(&g_in);
 
   // main.cpp 準拠の初期化。argv[0] はダミーで良い。
   const char* prog = "yaneuraou";
@@ -181,12 +314,20 @@ void run_engine(int fd) {
   // 登録済みエンジン(YaneuraOuEngine)の entry point を起動。"quit" が
   // 来るまでブロックする。
   run_engine_entry();
+
+  // ここに来たときには、このエンジンの探索スレッドは終わっている
+  // (USIEngine::loop() の最後で探索の終了を待ち、ThreadPool の破棄で join
+  // する。native/patches/0003 参照)。std::cin / std::cout の streambuf は
+  // 差し込んだまま残す(破棄しないので、残っていても安全)。
+  Connection* expected = conn;
+  g_current.compare_exchange_strong(expected, nullptr);
+  t_connection = nullptr;
 }
 
-// ソケットへの書き込みに送信タイムアウトを設定する。
+// ソケットへの書き込みに送信タイムアウトを設定する(あわせて SIGPIPE を止める)。
 //
 // USI の出力はすべて `sync_cout << ... << sync_endl` (source/misc.cpp) 経由で
-// 行われ、この操作は書き込み中プロセス全体で共有される `static mutex` を
+// 行われ、この操作は書き込み中 framework 内で共有される `static mutex` を
 // ロックしたまま実際の write() を行う。もし Dart 側がソケットを読み切らず
 // (アプリのバックグラウンド遷移でイベントループが滞留する等)、カーネルの
 // 送信バッファが埋まった状態が続くと、write() がタイムアウトなく永久に
@@ -198,12 +339,18 @@ void run_engine(int fd) {
 // ため、タイムアウトを設定しない=EAGAIN を EOF と誤認させない)。
 constexpr std::chrono::seconds kSendTimeout{10};
 
-void set_send_timeout(int fd) {
+void set_socket_options(int fd) {
   const auto sec = static_cast<time_t>(kSendTimeout.count());
   timeval tv{};
   tv.tv_sec = sec;
   tv.tv_usec = 0;
   ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#ifdef SO_NOSIGPIPE
+  // Darwin: 相手が閉じたソケットへの書き込みで SIGPIPE を出さない
+  // (Connection::kSendFlags のコメント参照)。
+  const int on = 1;
+  ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#endif
 }
 
 void engine_thread(std::string ip, int port, std::promise<void> finished) {
@@ -228,9 +375,12 @@ void engine_thread(std::string ip, int port, std::promise<void> finished) {
     return;
   }
 
-  set_send_timeout(fd);
-  run_engine(fd);
-  ::close(fd);
+  set_socket_options(fd);
+  // 破棄しない(前のエンジンや別の framework のスレッドが、終わったあとの
+  // 接続を参照しうるため。冒頭のコメント参照)。1回の起動で数十バイト。
+  Connection* conn = new Connection(fd);
+  run_engine(conn);
+  conn->finish();
   // run_engine() から戻った(= "quit" を受けて USI::loop を抜けた、または
   // ソケットが切断された)ことを、次回 yaneuraou_start() 呼び出し時の
   // join 待ちに通知する。
@@ -268,8 +418,12 @@ void engine_thread(std::string ip, int port, std::promise<void> finished) {
 // (source/engine/yaneuraou-engine/yaneuraou-search.cpp) は Engine を
 // 継承したローカルインスタンスであり、Threads/Options/局面はすべて
 // そのインスタンスのメンバであるため、新旧のエンジンインスタンス同士が
-// 直接データ競合することは基本的にない。ただし `sync_cout`/`sync_endl`
-// (source/misc.cpp) が使う出力直列化用の `static mutex` はプロセス全体で
+// 直接データ競合することは基本的にない。std::cin / std::cout は共有だが、
+// 冒頭のとおり差し込む streambuf と接続を破棄しないので、解放済みメモリに
+// は触れない。前のエンジンの USI ループは次に入力を読んだ時点で "quit" を
+// 受け取って終わる(探索スレッドの出力は、終わるまでの間だけ新しい接続へ
+// 混ざりうる)。ただし `sync_cout`/`sync_endl`
+// (source/misc.cpp) が使う出力直列化用の `static mutex` は framework 内で
 // 共有されており、detach したスレッドがまさにその mutex を保持したまま
 // 停止した場合は新しいエンジンの出力もブロックしうる。これは上記の
 // 送信タイムアウト(kSendTimeout)で「保持したまま停止する」こと自体を
